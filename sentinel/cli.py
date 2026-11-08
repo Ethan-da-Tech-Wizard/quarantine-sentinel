@@ -1,29 +1,13 @@
 """
-Command-Line Interface (CLI) for Quarantine Sentinel.
-
-Educational Overview:
----------------------
-In systems security and DevSecOps engineering, CLI tools serve as the frontline operational
-interface for both human administrators and automated CI/CD pipelines.
-
-Architectural Standards Applied Here:
-1. Standardized POSIX Exit Codes:
-   - Exit 0: Operational success, no high-risk threats detected.
-   - Exit 1: General execution or parameter error.
-   - Exit 2: High or Critical security threat detected during scanning (allows scripts, git pre-commit hooks,
-     and CI runners like GitHub Actions to immediately fail builds).
-2. TTY-Aware ANSI Formatting:
-   - Emits rich terminal styling (colors, status indicators, clean ASCII tabular alignments) when
-     connected to an interactive terminal (isatty).
-   - Automatically disables ANSI codes when piped to another program (e.g. `sentinel scan . | grep`)
-     or when the `NO_COLOR` environment variable is defined (per https://no-color.org standards).
-3. Structured Machine Output:
-   - Supports `--json` flag on all inspection commands for integration with SIEMs (Splunk, Elastic)
-     and automated security orchestration pipelines.
+Program: Quarantine Sentinel - Command-Line Interface (CLI)
+Programmer: Ethan Kilmer
+Last Modified: 11/08/2026
+Purpose: Provide a POSIX-standard CLI with TTY-aware colorized output and structured JSON export for scanning files, isolating threats into the vault, viewing receipts, verifying integrity, and restoring files.
 """
 
 from __future__ import annotations
 
+## Standard CLI, JSON, system, and filesystem modules
 import argparse
 import json
 import os
@@ -31,18 +15,20 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+## Import package version and core sentinel engines
 from sentinel import __version__
 from sentinel.magic import MagicInspector
 from sentinel.rules import RiskLevel, ThreatEngine, ThreatReport
 from sentinel.vault import QuarantineReceipt, QuarantineVault
 
 
-# =============================================================================
-# TERMINAL FORMATTING & COLOR UTILITIES
-# =============================================================================
+## ----------------------------------------------------------------------------
+## Terminal Color & Formatting Helper
+## ----------------------------------------------------------------------------
 
 class TermColor:
     """ANSI Escape sequence color formatter with automatic TTY detection."""
+    ## ANSI escape code constants
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -60,8 +46,10 @@ class TermColor:
         Check if ANSI colors should be emitted.
         Colors are disabled if stdout is redirected or NO_COLOR is defined.
         """
+        ## Honor NO_COLOR standard (https://no-color.org) and dumb terminals
         if "NO_COLOR" in os.environ or os.environ.get("TERM") == "dumb":
             return False
+        ## Only emit ANSI codes if stdout is connected to a live interactive terminal
         return sys.stdout.isatty()
 
     @classmethod
@@ -73,51 +61,60 @@ class TermColor:
 
     @classmethod
     def red(cls, text: str) -> str:
+        """Render text in red."""
         return cls.colorize(text, cls.RED)
 
     @classmethod
     def green(cls, text: str) -> str:
+        """Render text in green."""
         return cls.colorize(text, cls.GREEN)
 
     @classmethod
     def yellow(cls, text: str) -> str:
+        """Render text in yellow."""
         return cls.colorize(text, cls.YELLOW)
 
     @classmethod
     def cyan(cls, text: str) -> str:
+        """Render text in cyan."""
         return cls.colorize(text, cls.CYAN)
 
     @classmethod
     def bold(cls, text: str) -> str:
+        """Render text in bold."""
         return cls.colorize(text, cls.BOLD)
 
     @classmethod
     def dim(cls, text: str) -> str:
+        """Render text in dim style."""
         return cls.colorize(text, cls.DIM)
 
 
-# =============================================================================
-# CLI COMMAND HANDLERS
-# =============================================================================
+## ----------------------------------------------------------------------------
+## CLI Command Handlers
+## ----------------------------------------------------------------------------
 
 def handle_scan(args: argparse.Namespace) -> int:
     """
     Recursively inspect files and print forensic threat reports.
     """
+    ## Resolve target path
     target_path = Path(args.path).resolve()
     if not target_path.exists():
         print(TermColor.red(f"Error: Target path does not exist: {target_path}"), file=sys.stderr)
         return 1
 
+    ## Collect list of candidate regular files
     files_to_scan: List[Path] = []
     if target_path.is_file():
         files_to_scan.append(target_path)
     else:
-        # Collect regular files recursively, ignoring broken symlinks
+        ## Collect regular files recursively, ignoring broken symlinks
         for item in sorted(target_path.rglob("*")):
             if item.is_file() and not item.is_symlink():
                 files_to_scan.append(item)
 
+    ## Early exit if directory is empty
     if not files_to_scan:
         print(TermColor.yellow(f"No regular files discovered under {target_path}"))
         return 0
@@ -125,6 +122,7 @@ def handle_scan(args: argparse.Namespace) -> int:
     reports: List[ThreatReport] = []
     threat_count = 0
 
+    ## Execute forensic threat analysis on each file
     for file_path in files_to_scan:
         try:
             report = ThreatEngine.analyze_file(file_path)
@@ -135,9 +133,7 @@ def handle_scan(args: argparse.Namespace) -> int:
             if not args.json:
                 print(TermColor.red(f"Failed to analyze {file_path}: {ex}"), file=sys.stderr)
 
-    # -------------------------------------------------------------------------
-    # JSON OUTPUT FORMAT
-    # -------------------------------------------------------------------------
+    ## Output structured JSON if requested
     if args.json:
         output_data = {
             "target": str(target_path),
@@ -148,15 +144,14 @@ def handle_scan(args: argparse.Namespace) -> int:
         print(json.dumps(output_data, indent=2))
         return 2 if threat_count > 0 else 0
 
-    # -------------------------------------------------------------------------
-    # HUMAN-READABLE TERMINAL OUTPUT FORMAT
-    # -------------------------------------------------------------------------
+    ## Human-readable interactive terminal formatting
     print(TermColor.bold(f"\n🔍 Quarantine Sentinel Scan Summary: {target_path}"))
     print(TermColor.dim("=" * 78))
     print(f"Total Files Scanned: {TermColor.cyan(str(len(files_to_scan)))} | "
           f"Threats Detected: {TermColor.red(str(threat_count)) if threat_count > 0 else TermColor.green('0')}")
     print(TermColor.dim("-" * 78))
 
+    ## Filter display reports
     display_reports = [r for r in reports if args.show_all or r.is_suspicious]
 
     if not display_reports:
@@ -164,8 +159,8 @@ def handle_scan(args: argparse.Namespace) -> int:
         print(TermColor.dim("=" * 78 + "\n"))
         return 0
 
+    ## Render individual threat reports
     for r in display_reports:
-        # Color badge according to severity
         if r.risk_level == RiskLevel.CRITICAL:
             badge = TermColor.red(f"[{r.risk_level.value} - SCORE {r.risk_score}]")
         elif r.risk_level == RiskLevel.HIGH:
@@ -192,6 +187,7 @@ def handle_scan(args: argparse.Namespace) -> int:
     print(TermColor.dim("\n" + "=" * 78))
     if threat_count > 0:
         print(TermColor.yellow(f"⚠️  {threat_count} suspicious file(s) identified. Run 'quarantine' to isolate them into the vault.\n"))
+        ## POSIX Exit Code 2 signals detected threats to CI/CD and pre-commit runners
         return 2
 
     print(TermColor.green("✓ Clean scan complete.\n"))
@@ -207,8 +203,10 @@ def handle_quarantine(args: argparse.Namespace) -> int:
         print(TermColor.red(f"Error: Target path does not exist: {target_path}"), file=sys.stderr)
         return 1
 
+    ## Initialize vault instance
     vault = QuarantineVault(vault_dir=args.vault_dir)
 
+    ## Collect target files
     files_to_check: List[Path] = []
     if target_path.is_file():
         files_to_check.append(target_path)
@@ -224,6 +222,7 @@ def handle_quarantine(args: argparse.Namespace) -> int:
     print(TermColor.dim(f"Vault Directory: {vault.vault_dir}"))
     print(TermColor.dim("=" * 78))
 
+    ## Process each candidate file
     for file_path in files_to_check:
         try:
             report = ThreatEngine.analyze_file(file_path)
@@ -391,9 +390,9 @@ def handle_verify_vault(args: argparse.Namespace) -> int:
         return 1
 
 
-# =============================================================================
-# CLI PARSER DEFINITION
-# =============================================================================
+## ----------------------------------------------------------------------------
+## CLI Parser Definition & Main Execution
+## ----------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
@@ -409,37 +408,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available sub-commands")
 
-    # Command: scan
+    ## Command: scan
     scan_parser = subparsers.add_parser("scan", help="Scan files or directories for disguised executables and threats")
     scan_parser.add_argument("path", help="Path to file or directory to scan")
     scan_parser.add_argument("--all", dest="show_all", action="store_true", help="Display all files including clean ones")
     scan_parser.add_argument("--json", action="store_true", help="Output results in JSON format")
 
-    # Command: quarantine
+    ## Command: quarantine
     quar_parser = subparsers.add_parser("quarantine", help="Scan and automatically isolate suspicious files into the vault")
     quar_parser.add_argument("path", help="Path to file or directory to inspect and quarantine")
     quar_parser.add_argument("--vault-dir", default=None, help="Custom quarantine vault path")
     quar_parser.add_argument("--dry-run", action="store_true", help="Preview files to be quarantined without moving them")
     quar_parser.add_argument("--force", action="store_true", help="Force quarantine even if risk score is low")
 
-    # Command: receipts
+    ## Command: receipts
     receipts_parser = subparsers.add_parser("receipts", help="List all quarantine audit receipts")
     receipts_parser.add_argument("--vault-dir", default=None, help="Custom quarantine vault path")
     receipts_parser.add_argument("--json", action="store_true", help="Output receipts in JSON format")
 
-    # Command: receipt
+    ## Command: receipt
     receipt_parser = subparsers.add_parser("receipt", help="Show full forensic details for a specific quarantine record")
     receipt_parser.add_argument("quarantine_id", help="Quarantine ID to inspect")
     receipt_parser.add_argument("--vault-dir", default=None, help="Custom quarantine vault path")
     receipt_parser.add_argument("--json", action="store_true", help="Output receipt in JSON format")
 
-    # Command: restore
+    ## Command: restore
     restore_parser = subparsers.add_parser("restore", help="Safely restore a quarantined file with hash verification")
     restore_parser.add_argument("quarantine_id", help="Quarantine ID of payload to restore")
     restore_parser.add_argument("--target", default=None, help="Optional destination path or directory")
     restore_parser.add_argument("--vault-dir", default=None, help="Custom quarantine vault path")
 
-    # Command: verify
+    ## Command: verify
     verify_parser = subparsers.add_parser("verify", help="Audit vault integrity and cryptographic hash proofs")
     verify_parser.add_argument("--vault-dir", default=None, help="Custom quarantine vault path")
 
@@ -451,10 +450,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    ## If no subcommand provided, show help message
     if not args.command:
         parser.print_help()
         return 1
 
+    ## Route to appropriate command handler
     if args.command == "scan":
         return handle_scan(args)
     elif args.command == "quarantine":

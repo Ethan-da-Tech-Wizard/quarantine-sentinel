@@ -1,40 +1,13 @@
 """
-Defensive Security Heuristics & Threat Detection Engine.
-
-Educational Overview:
----------------------
-Modern malware rarely arrives with an honest label. Instead, adversaries rely on three
-core behavioral vectors to trick operating systems and users into running unauthorized code:
-
-1. Binary Masquerading (MITRE ATT&CK T1036.001):
-   Altering file extensions so that a compiled ELF binary, Windows PE32 executable, or
-   shell script claims to be an innocuous passive document (e.g., .pdf, .docx, .png, .jpg).
-   Operating systems that decouple execution semantics from file extensions (like Linux execve)
-   will execute the payload without warning if invoked by scripts or terminal users.
-
-2. Right-to-Left Override (RLO) & Unicode Evasion (MITRE ATT&CK T1036.002):
-   Unicode contains bidirectional control characters designed to support right-to-left scripts
-   like Arabic and Hebrew. The control character U+202E (RIGHT-TO-LEFT OVERRIDE) forces graphical
-   rendering engines to reverse the subsequent characters.
-   For example, the string "tax_report_\u202Efdp.exe" visually appears in file browsers and terminals
-   as "tax_report_exe.pdf". The user perceives a benign PDF, but clicking it executes an .exe binary!
-
-3. Double Extensions (MITRE ATT&CK T1036.007):
-   Files named `statement.pdf.exe` or `backup.tar.gz.sh`. Many file explorers hide known extensions
-   by default, causing `statement.pdf.exe` to display merely as `statement.pdf`.
-
-4. POSIX Permission Anomalies:
-   Under POSIX file standards, permission bits (st_mode) control read (4), write (2), and execute (1)
-   permissions for user, group, and others. A document (.pdf, .docx) or media file (.png, .mp3)
-   should never possess executable permissions (S_IXUSR, S_IXGRP, S_IXOTH). The presence of `+x`
-   on a document file strongly indicates either an attempted privilege exploitation or a weaponized dropper.
-
-This engine inspects filenames, paths, filesystem permission bits, and binary magic results
-to produce an objective, quantifiable risk report.
+Program: Quarantine Sentinel - Threat Detection & Heuristic Rules Engine
+Programmer: Ethan Kilmer
+Last Modified: 11/08/2026
+Purpose: Evaluate untrusted files against forensic security heuristics including binary masquerading, double extension camouflage, Unicode RLO/zero-width attacks, shebang disguises, and POSIX permission anomalies.
 """
 
 from __future__ import annotations
 
+## Standard operating system, regex, and file status libraries
 import os
 import re
 import stat
@@ -43,20 +16,38 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Set, Tuple, Union
 
+## Import sibling modules for cryptographic manifests and binary format results
 from sentinel.hasher import CryptoHasher, HashManifest
 from sentinel.magic import FileTypeCategory, MagicInspectionResult, MagicInspector
 
+
+## ----------------------------------------------------------------------------
+## Risk Classification Enum
+## ----------------------------------------------------------------------------
 
 class RiskLevel(str, Enum):
     """
     Categorical threat severity assessment.
     """
-    SAFE = "SAFE"            # Score 0: No indicators of compromise or spoofing
-    LOW = "LOW"              # Score 1-25: Minor hygiene warning (e.g., hidden empty file)
-    MEDIUM = "MEDIUM"        # Score 26-50: Suspicious configuration (e.g., shebang in .txt)
-    HIGH = "HIGH"            # Score 51-75: High probability threat (e.g., double extension, +x on PDF)
-    CRITICAL = "CRITICAL"    # Score 76-100: Confirmed weaponization (e.g., ELF disguised as PDF, RLO attack)
+    ## Score 0: Completely benign file with zero detected indicators of compromise
+    SAFE = "SAFE"
 
+    ## Score 1-25: Minor hygiene warning (e.g., hidden file or non-standard configuration)
+    LOW = "LOW"
+
+    ## Score 26-50: Suspicious configuration (e.g., shebang hidden inside text file)
+    MEDIUM = "MEDIUM"
+
+    ## Score 51-75: High probability threat (e.g., double extension camouflage or +x on PDF)
+    HIGH = "HIGH"
+
+    ## Score 76-100: Confirmed weaponization (e.g., ELF masquerading as PDF or Unicode RLO attack)
+    CRITICAL = "CRITICAL"
+
+
+## ----------------------------------------------------------------------------
+## Forensic Finding Data Structure
+## ----------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Finding:
@@ -70,13 +61,23 @@ class Finding:
         score_impact: Numeric points contributed to the overall risk score (0-100).
         explanation: Detailed educational explanation of the attack mechanism and mitigation.
     """
+    ## Unique rule identifier
     rule_id: str
+
+    ## Brief title of the heuristic rule
     title: str
+
+    ## Severity classification
     severity: RiskLevel
+
+    ## Numeric score contribution
     score_impact: int
+
+    ## Detailed human-readable explanation
     explanation: str
 
     def to_dict(self) -> dict:
+        """Serialize finding to dictionary format for JSON reporting."""
         return {
             "rule_id": self.rule_id,
             "title": self.title,
@@ -85,6 +86,10 @@ class Finding:
             "explanation": self.explanation,
         }
 
+
+## ----------------------------------------------------------------------------
+## Comprehensive Threat Report
+## ----------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ThreatReport:
@@ -100,15 +105,29 @@ class ThreatReport:
         magic_result: Binary inspection metadata and detected MIME type.
         hash_manifest: Cryptographic SHA-256, SHA-512, and MD5 fingerprints.
     """
+    ## Absolute path on the filesystem
     file_path: Path
+
+    ## Decision flag: True if file meets quarantine threshold
     is_suspicious: bool
+
+    ## Numeric score bounded between 0 and 100
     risk_score: int
+
+    ## Categorical risk rating
     risk_level: RiskLevel
+
+    ## List of detected heuristic findings
     findings: List[Finding]
+
+    ## Low-level binary format inspection results
     magic_result: MagicInspectionResult
+
+    ## Multi-algorithm cryptographic hash digests
     hash_manifest: HashManifest
 
     def to_dict(self) -> dict:
+        """Serialize entire report to JSON-compatible dictionary."""
         return {
             "file_path": str(self.file_path),
             "is_suspicious": self.is_suspicious,
@@ -127,6 +146,10 @@ class ThreatReport:
         }
 
 
+## ----------------------------------------------------------------------------
+## Threat Engine
+## ----------------------------------------------------------------------------
+
 class ThreatEngine:
     """
     Orchestrator for file threat analysis.
@@ -134,53 +157,55 @@ class ThreatEngine:
     Evaluates untrusted files against a battery of heuristic rules and binary signatures.
     """
 
-    # Non-executable file extensions that should NEVER be binary executables or scripts
+    ## Non-executable document file extensions that should NEVER contain runnable machine code
     BENIGN_DOCUMENT_EXTENSIONS: Set[str] = {
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
         ".odt", ".ods", ".odp", ".rtf", ".csv", ".tsv",
     }
 
+    ## Non-executable image extensions
     BENIGN_IMAGE_EXTENSIONS: Set[str] = {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".tif",
         ".webp", ".ico", ".svg",
     }
 
+    ## Non-executable audio and video media extensions
     BENIGN_MEDIA_EXTENSIONS: Set[str] = {
         ".mp3", ".wav", ".flac", ".ogg", ".mp4", ".mkv", ".avi", ".mov",
     }
 
+    ## Non-executable plaintext and markup extensions
     BENIGN_TEXT_EXTENSIONS: Set[str] = {
         ".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".xml", ".ini", ".conf",
     }
 
-    # Known executable and script extensions
+    ## Known executable binaries and interpreted script extensions
     EXECUTABLE_EXTENSIONS: Set[str] = {
         ".exe", ".dll", ".so", ".dylib", ".bin", ".elf", ".com", ".scr",
         ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf",
         ".sh", ".bash", ".zsh", ".csh", ".py", ".pyw", ".pl", ".rb",
     }
 
-    # Unicode Bidirectional Control Characters (used in RLO attacks)
-    # Ref: Unicode Standard Annex #9 (Unicode Bidirectional Algorithm)
+    ## Unicode Bidirectional Control Characters (used in Right-To-Left Override spoofing attacks)
     BIDI_CONTROL_CODEPOINTS: Set[int] = {
-        0x202A,  # LEFT-TO-RIGHT EMBEDDING (LRE)
-        0x202B,  # RIGHT-TO-LEFT EMBEDDING (RLE)
-        0x202C,  # POP DIRECTIONAL FORMATTING (PDF)
-        0x202D,  # LEFT-TO-RIGHT OVERRIDE (LRO)
-        0x202E,  # RIGHT-TO-LEFT OVERRIDE (RLO) - Primary weaponization vector
-        0x2066,  # LEFT-TO-RIGHT ISOLATE (LRI)
-        0x2067,  # RIGHT-TO-LEFT ISOLATE (RLI)
-        0x2068,  # FIRST STRONG ISOLATE (FSI)
-        0x2069,  # POP DIRECTIONAL ISOLATE (PDI)
+        0x202A,  ## LEFT-TO-RIGHT EMBEDDING (LRE)
+        0x202B,  ## RIGHT-TO-LEFT EMBEDDING (RLE)
+        0x202C,  ## POP DIRECTIONAL FORMATTING (PDF)
+        0x202D,  ## LEFT-TO-RIGHT OVERRIDE (LRO)
+        0x202E,  ## RIGHT-TO-LEFT OVERRIDE (RLO) - Primary weaponization vector
+        0x2066,  ## LEFT-TO-RIGHT ISOLATE (LRI)
+        0x2067,  ## RIGHT-TO-LEFT ISOLATE (RLI)
+        0x2068,  ## FIRST STRONG ISOLATE (FSI)
+        0x2069,  ## POP DIRECTIONAL ISOLATE (PDI)
     }
 
-    # Zero-Width and Invisible Unicode Characters (used for visual spoofing and filter evasion)
+    ## Zero-Width and Invisible Unicode Characters (used to bypass string equality and antivirus regex)
     ZERO_WIDTH_CODEPOINTS: Set[int] = {
-        0x200B,  # ZERO WIDTH SPACE
-        0x200C,  # ZERO WIDTH NON-JOINER
-        0x200D,  # ZERO WIDTH JOINER
-        0x2060,  # WORD JOINER
-        0xFEFF,  # ZERO WIDTH NO-BREAK SPACE (Byte Order Mark)
+        0x200B,  ## ZERO WIDTH SPACE
+        0x200C,  ## ZERO WIDTH NON-JOINER
+        0x200D,  ## ZERO WIDTH JOINER
+        0x2060,  ## WORD JOINER
+        0xFEFF,  ## ZERO WIDTH NO-BREAK SPACE (Byte Order Mark)
     }
 
     @classmethod
@@ -195,37 +220,53 @@ class ThreatEngine:
         4. Evaluate heuristic rules (disguised binaries, RLO unicode, double extensions, +x anomalies).
         5. Calculate composite risk score and generate immutable ThreatReport.
         """
+        ## Normalize path to resolved absolute location
         file_path = Path(path).resolve()
 
+        ## Defensive check: Verify file exists
         if not file_path.exists():
             raise FileNotFoundError(f"Target file does not exist: {file_path}")
+
+        ## Defensive check: Ensure target is a file and not a directory
         if file_path.is_dir():
             raise IsADirectoryError(f"Target path is a directory, not a file: {file_path}")
 
-        # Retrieve POSIX stat metadata
+        ## Step 1: Query POSIX stat metadata
         file_stat = file_path.stat()
 
-        # Step 2: Binary magic signature inspection
+        ## Step 2: Binary magic signature inspection
         magic_result = MagicInspector.inspect_file(file_path)
 
-        # Step 3: Multi-hash cryptographic fingerprinting
+        ## Step 3: Multi-hash cryptographic fingerprinting
         hash_manifest = CryptoHasher.hash_file(file_path)
 
-        # Step 4: Evaluate heuristic rules
+        ## Step 4: Evaluate forensic heuristic rules
         findings: List[Finding] = []
 
+        ## Check 4a: Disguised binary executables masquerading as passive files
         cls._check_disguised_executable(file_path, magic_result, findings)
+
+        ## Check 4b: Double extension evasion techniques
         cls._check_double_extension(file_path, findings)
+
+        ## Check 4c: Unicode Bidirectional Override and invisible characters
         cls._check_unicode_obfuscation(file_path, findings)
+
+        ## Check 4d: Shebang scripts disguised behind text extensions
         cls._check_shebang_script_camouflage(file_path, magic_result, findings)
+
+        ## Check 4e: POSIX executable permission anomalies on passive documents
         cls._check_posix_permission_anomaly(file_path, file_stat, magic_result, findings)
+
+        ## Check 4f: Hidden binaries or scripts prefixed with a dot
         cls._check_hidden_binary(file_path, magic_result, findings)
 
-        # Step 5: Compute risk score
+        ## Step 5: Compute composite risk score
         risk_score = 0
         has_critical = False
         has_high = False
 
+        ## Aggregate score contributions across all triggered findings
         for f in findings:
             risk_score += f.score_impact
             if f.severity == RiskLevel.CRITICAL:
@@ -233,16 +274,16 @@ class ThreatEngine:
             elif f.severity == RiskLevel.HIGH:
                 has_high = True
 
-        # Cap score between 0 and 100
+        ## Bound risk score strictly between 0 and 100
         risk_score = min(100, max(0, risk_score))
 
-        # Enforce minimum score floors for severe findings
+        ## Enforce minimum baseline floors for high and critical threats
         if has_critical and risk_score < 80:
             risk_score = 85
         elif has_high and risk_score < 55:
             risk_score = 60
 
-        # Determine overall categorical risk level
+        ## Determine high-level categorical risk level
         if risk_score >= 76:
             risk_level = RiskLevel.CRITICAL
         elif risk_score >= 51:
@@ -254,7 +295,7 @@ class ThreatEngine:
         else:
             risk_level = RiskLevel.SAFE
 
-        # A file is flagged as suspicious if risk score >= 50 or has high/critical findings
+        ## Flag file as suspicious if risk score >= 50 or any critical/high finding triggered
         is_suspicious = risk_score >= 50 or has_critical or has_high
 
         return ThreatReport(
@@ -267,9 +308,9 @@ class ThreatEngine:
             hash_manifest=hash_manifest,
         )
 
-    # =========================================================================
-    # HEURISTIC RULE IMPLEMENTATIONS (Educational Explanations)
-    # =========================================================================
+    ## =========================================================================
+    ## HEURISTIC RULE IMPLEMENTATIONS
+    ## =========================================================================
 
     @classmethod
     def _check_disguised_executable(
@@ -280,14 +321,11 @@ class ThreatEngine:
     ) -> None:
         """
         Rule: Disguised Executable or Binary Masquerading (MITRE ATT&CK T1036.001).
-
-        Threat Mechanics:
-        Attackers rename weaponized binaries (ELF Linux executables, Windows PE executables,
-        Mach-O binaries) to match harmless extensions like `.pdf`, `.docx`, `.png`, or `.jpg`.
-        If the file's extension promises an inert media format, but the binary magic proves
-        it is an executable, this is an unequivocal malicious masquerade attempt.
         """
+        ## Extract lowercase file extension
         ext = file_path.suffix.lower()
+
+        ## Union all passive, non-executable extension sets
         all_passive_extensions = (
             cls.BENIGN_DOCUMENT_EXTENSIONS |
             cls.BENIGN_IMAGE_EXTENSIONS |
@@ -295,6 +333,7 @@ class ThreatEngine:
             cls.BENIGN_TEXT_EXTENSIONS
         )
 
+        ## Trigger finding if extension claims passive media but magic indicates executable code
         if ext in all_passive_extensions and magic.is_executable:
             findings.append(Finding(
                 rule_id="RULE_DISGUISED_BINARY",
@@ -317,17 +356,11 @@ class ThreatEngine:
     ) -> None:
         """
         Rule: Double Extension Camouflage (MITRE ATT&CK T1036.007).
-
-        Threat Mechanics:
-        A file named `quarterly_report.pdf.exe` or `family_photo.png.sh` exploits default OS
-        GUI configurations that conceal known extensions (e.g. hiding `.exe` so the user only
-        sees `quarterly_report.pdf`). Even on Linux/macOS, users glancing at long filenames
-        frequently overlook the trailing executable suffix.
         """
         filename = file_path.name.lower()
         suffixes = [s.lower() for s in file_path.suffixes]
 
-        # Check for multiple extensions
+        ## Check if filename contains two or more extension suffixes
         if len(suffixes) >= 2:
             final_ext = suffixes[-1]
             penultimate_ext = suffixes[-2]
@@ -338,6 +371,7 @@ class ThreatEngine:
                 cls.BENIGN_MEDIA_EXTENSIONS
             )
 
+            ## Check if penultimate extension is benign document while trailing is executable
             if penultimate_ext in passive_extensions and final_ext in cls.EXECUTABLE_EXTENSIONS:
                 findings.append(Finding(
                     rule_id="RULE_DOUBLE_EXTENSION",
@@ -352,7 +386,7 @@ class ThreatEngine:
                     ),
                 ))
 
-        # Check for excessive dot padding: e.g., "document.pdf.................exe"
+        ## Check for dot-padding obfuscation: e.g., 'document.pdf...........exe'
         if re.search(r"\.[a-zA-Z0-9]{2,4}\.{2,}[a-zA-Z0-9]{2,4}$", filename):
             findings.append(Finding(
                 rule_id="RULE_DOT_PADDING_EVASION",
@@ -374,19 +408,10 @@ class ThreatEngine:
     ) -> None:
         """
         Rule: Unicode Bidirectional Override (RLO) & Zero-Width Obfuscation (MITRE ATT&CK T1036.002).
-
-        Threat Mechanics:
-        1. RLO Attack: Inserting the Unicode character U+202E (RIGHT-TO-LEFT OVERRIDE) reverses the
-           display direction of following characters.
-           Example: A file named "financial_\u202Efdp.exe" reverses "fdp.exe" into "exe.pdf",
-           causing desktop environments, web browsers, and file pickers to display "financial_exe.pdf".
-        2. Zero-Width Attack: Characters like U+200B (ZERO WIDTH SPACE) or U+FEFF are visually
-           invisible but alter the filename string, breaking naïve string equality checks, antivirus
-           regex filters, and bash command matching.
         """
         filename = file_path.name
 
-        # Check for Bidirectional control characters
+        ## Scan filename for bidirectional control characters
         found_bidi = [f"U+{ord(c):04X}" for c in filename if ord(c) in cls.BIDI_CONTROL_CODEPOINTS]
         if found_bidi:
             findings.append(Finding(
@@ -402,7 +427,7 @@ class ThreatEngine:
                 ),
             ))
 
-        # Check for Zero-Width invisible characters
+        ## Scan filename for zero-width invisible characters
         found_zero_width = [f"U+{ord(c):04X}" for c in filename if ord(c) in cls.ZERO_WIDTH_CODEPOINTS]
         if found_zero_width:
             findings.append(Finding(
@@ -426,16 +451,10 @@ class ThreatEngine:
     ) -> None:
         """
         Rule: Shebang Script Camouflage.
-
-        Threat Mechanics:
-        A file masquerading as a harmless plaintext file (`.txt`, `.log`, `.cfg`, or no extension)
-        that begins with a POSIX shebang (`#!/bin/bash`, `#!/usr/bin/env python3`).
-        In Unix-like systems, if such a file is fed to `/bin/sh` or invoked via `chmod +x`,
-        the operating system will spawn an interactive shell process and execute arbitrary instructions.
         """
         ext = file_path.suffix.lower()
 
-        # If it claims to be .txt or .log or has no extension, but has an active shebang script
+        ## Check if file uses inert text extension but binary magic detects active script shebang
         if ext in {".txt", ".log", ".cfg", ".conf", ".dat", ""} and magic.category == FileTypeCategory.SCRIPT:
             interpreter = magic.details.get("interpreter", "unknown")
             findings.append(Finding(
@@ -461,17 +480,10 @@ class ThreatEngine:
     ) -> None:
         """
         Rule: POSIX Executable Bit on Non-Executable Media/Documents.
-
-        Threat Mechanics:
-        Under POSIX security models, file permissions (st_mode) define execution privileges:
-        - S_IXUSR (0o100): Owner executable
-        - S_IXGRP (0o010): Group executable
-        - S_IXOTH (0o001): World/Other executable
-        Any combination of these (mode & 0o111 != 0) grants execution rights.
-        Passive documents (PDF, DOCX) and media files (PNG, MP3) should NEVER possess execution permissions.
-        If a document has `+x` enabled, it indicates an execution staging artifact or dropper misconfiguration.
         """
         mode = file_stat.st_mode
+
+        ## Check if any executable bit is set (User, Group, or Other)
         is_executable_bit_set = bool(mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
 
         ext = file_path.suffix.lower()
@@ -481,6 +493,7 @@ class ThreatEngine:
             cls.BENIGN_MEDIA_EXTENSIONS
         )
 
+        ## Check if executable permission bit is enabled on passive media format
         if is_executable_bit_set and ext in passive_extensions:
             octal_mode = oct(mode & 0o777)
             findings.append(Finding(
@@ -505,12 +518,8 @@ class ThreatEngine:
     ) -> None:
         """
         Rule: Hidden Binary or Script in Staging Location.
-
-        Threat Mechanics:
-        In POSIX systems, filenames beginning with a dot (`.`) are concealed from standard `ls`
-        and graphical file listings. Malware frequently writes hidden binaries (e.g. `.miner.elf`, `.backdoor.sh`)
-        into untrusted staging folders (like `/tmp`, `~/Downloads`, or upload directories) to avoid discovery.
         """
+        ## Check if filename begins with '.' and has executable payload
         if file_path.name.startswith(".") and len(file_path.name) > 1:
             if magic.is_executable:
                 findings.append(Finding(
