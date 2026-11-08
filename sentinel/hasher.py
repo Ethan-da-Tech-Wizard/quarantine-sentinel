@@ -1,39 +1,22 @@
 """
-Streaming Multi-Algorithm Cryptographic Hasher.
-
-Educational Overview:
----------------------
-In defensive security operations, calculating cryptographic digests (hashes) serves two primary roles:
-1. Integrity Verification: Demonstrating beyond mathematical doubt that an quarantined file has not
-   been altered, corrupted, or tampered with while in storage.
-2. Threat Intelligence Correlation: Cross-referencing samples against local and global indicators of
-   compromise (IoCs).
-
-Why Multi-Hash Streaming?
-- SHA-256: The contemporary industry-standard cryptographic hash function (FIPS PUB 180-4). Provides
-  256-bit collision resistance and is immune to practical collision attacks.
-- SHA-512: 512-bit digest offering higher margin of security against quantum and hyper-scale pre-image
-  attacks, while running exceptionally fast on 64-bit CPU architectures (due to native 64-bit words).
-- MD5: Computationally broken for collision resistance (RFC 1321), yet universally retained in digital
-  forensics and incident response (DFIR) because historical malware threat feeds (e.g. VirusTotal,
-  MISP, legacy databases) index hundreds of millions of samples by MD5.
-
-Defensive Architecture: Single-Pass O(1) Memory Streaming:
-Loading entire files into RAM via `f.read()` is a severe vulnerability:
-- A malicious actor can drop a 10 GB sparse file or archive payload designed to trigger Linux OOM Killer
-  (Out-Of-Memory) or freeze server environments.
-- By streaming files in fixed-size 64 KiB chunks (`65,536` bytes), our memory footprint remains strictly
-  bounded at ~64 KiB regardless of whether the target file is 10 bytes or 100 gigabytes.
-- All hash algorithms are updated simultaneously in the same single disk read pass, minimizing I/O bus contention.
+Program: Quarantine Sentinel - Streaming Cryptographic Multi-Hasher
+Programmer: Ethan Kilmer
+Last Modified: 11/08/2026
+Purpose: Compute simultaneous SHA-256, SHA-512, and MD5 cryptographic digests using bounded 64KB streaming buffers to prevent memory exhaustion and establish immutable file integrity.
 """
 
 from __future__ import annotations
 
+## Standard library cryptographic and filesystem utilities
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+
+## ----------------------------------------------------------------------------
+## Data Model: HashManifest
+## ----------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class HashManifest:
@@ -46,6 +29,7 @@ class HashManifest:
         md5: Hex-encoded MD5 digest (32 lowercase hex characters).
         file_size_bytes: Exact byte count of the file at time of hashing.
     """
+    ## Cryptographic digest strings
     sha256: str
     sha512: str
     md5: str
@@ -56,15 +40,24 @@ class HashManifest:
         """
         Return human-readable file size with binary prefixes (KiB, MiB, GiB).
         """
+        ## Convert integer bytes to floating point for gradual division
         size = float(self.file_size_bytes)
+
+        ## Iterate through binary scale units
         for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            ## Check if size fits within current 1024 scale boundary
             if size < 1024.0:
+                ## Format with 2 decimal places unless working with raw bytes
                 return f"{size:.2f} {unit}" if unit != "B" else f"{int(size)} B"
+            ## Scale down to next magnitude
             size /= 1024.0
+
+        ## Fallback for extremely large enterprise archives
         return f"{size:.2f} PiB"
 
     def to_dict(self) -> Dict[str, Union[str, int]]:
         """Serialize manifest to dictionary for JSON audit receipts."""
+        ## Return plain dictionary suitable for json.dump()
         return {
             "sha256": self.sha256,
             "sha512": self.sha512,
@@ -74,6 +67,10 @@ class HashManifest:
         }
 
 
+## ----------------------------------------------------------------------------
+## Core Engine: CryptoHasher
+## ----------------------------------------------------------------------------
+
 class CryptoHasher:
     """
     Memory-efficient streaming cryptographic hash generator.
@@ -82,9 +79,9 @@ class CryptoHasher:
     which binds directly to OpenSSL C implementations for maximum throughput.
     """
 
-    # 64 KiB (65536 bytes) chunk buffer size.
-    # Aligns cleanly with standard OS virtual memory page sizes (4 KiB or 64 KiB)
-    # and optimizes L1/L2 CPU cache utilization without exhausting physical RAM.
+    ## 64 KiB (65,536 bytes) chunk buffer size.
+    ## Aligns cleanly with standard OS virtual memory page sizes (4 KiB or 64 KiB)
+    ## and optimizes L1/L2 CPU cache utilization without exhausting physical RAM.
     CHUNK_SIZE: int = 65536
 
     @classmethod
@@ -103,38 +100,50 @@ class CryptoHasher:
             PermissionError: If read permissions are withheld by the OS.
             IsADirectoryError: If target path points to a directory rather than a file.
         """
+        ## Normalize input path to a standard Path object
         file_path = Path(path)
 
+        ## Defensive check: Verify file existence before attempting to open
         if not file_path.exists():
             raise FileNotFoundError(f"File not found for cryptographic hashing: {file_path}")
+
+        ## Defensive check: Prevent hashing directory nodes
         if file_path.is_dir():
             raise IsADirectoryError(f"Cannot hash a directory: {file_path}")
 
-        # Initialize hash accumulators simultaneously
+        ## Initialize all three hash accumulators simultaneously
+        ## SHA-256: FIPS standard for tamper-proof cryptographic verification
         hasher_sha256 = hashlib.sha256()
+
+        ## SHA-512: 512-bit digest with high performance on 64-bit architectures
         hasher_sha512 = hashlib.sha512()
+
+        ## MD5: Retained for threat intelligence correlation against legacy IoC feeds
         hasher_md5 = hashlib.md5()
 
+        ## Byte accumulator tracking the exact stream length
         total_bytes = 0
 
-        # Open in binary mode ('rb') to guarantee byte-exact raw reading without OS newline translation
+        ## Open target file in raw binary mode ('rb') to avoid OS newline transformations
         with open(file_path, "rb") as f:
+            ## Stream file sequentially in fixed-size memory chunks
             while True:
-                # Read next slice into buffer
+                ## Read next slice into bounded memory buffer (max 64 KiB)
                 chunk = f.read(cls.CHUNK_SIZE)
+
+                ## Check for End-Of-File (EOF) marker
                 if not chunk:
-                    # End of file reached (EOF)
                     break
 
-                # Increment byte counter
+                ## Increment total byte count by slice length
                 total_bytes += len(chunk)
 
-                # Feed current chunk to all three hashing engines in-place
+                ## Feed chunk simultaneously to all three hashing engines in-place
                 hasher_sha256.update(chunk)
                 hasher_sha512.update(chunk)
                 hasher_md5.update(chunk)
 
-        # Finalize digests into hex strings
+        ## Finalize digests into standardized lowercase hexadecimal strings
         return HashManifest(
             sha256=hasher_sha256.hexdigest(),
             sha512=hasher_sha512.hexdigest(),
@@ -149,6 +158,7 @@ class CryptoHasher:
 
         Convenient helper for unit testing and header verification.
         """
+        ## Feed raw byte slice directly into hashlib algorithms
         return HashManifest(
             sha256=hashlib.sha256(data).hexdigest(),
             sha512=hashlib.sha512(data).hexdigest(),
@@ -161,11 +171,14 @@ class CryptoHasher:
         """
         Verify that a file on disk matches an expected SHA-256 digest.
 
-        Uses constant-time comparison (`secrets.compare_digest`) via `hmac.compare_digest`
+        Uses constant-time comparison (`secrets.compare_digest` / `hmac.compare_digest`)
         to prevent side-channel timing attacks when validating cryptographic proofs.
         """
+        ## Import hmac for timing-attack-resistant constant-time string comparison
         import hmac
 
+        ## Compute current disk hash via bounded streaming
         manifest = cls.hash_file(path)
-        # Constant time hex string comparison prevents timing leak attacks
+
+        ## Perform constant-time hex comparison to eliminate timing side-channel leakage
         return hmac.compare_digest(manifest.sha256.lower(), expected_sha256.lower())

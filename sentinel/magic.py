@@ -1,34 +1,23 @@
 """
-Binary Magic Signature Inspection & Header Analysis Engine.
-
-Educational Overview:
----------------------
-In POSIX and Unix-like operating systems, a file's extension (e.g., .txt, .pdf, .exe)
-is merely a human-readable convention and advisory metadata stored in directory entries.
-The kernel's execve() system call does not care about file extensions; instead, it looks
-at the initial bytes of the file—known as the "magic bytes" or "file signature"—to determine
-how to load and execute the file.
-
-Attackers routinely exploit this architecture via "Extension Spoofing" and "Binary Masquerading":
-- Naming a compiled ELF Linux binary or Windows PE32 executable as `financial_report.pdf`
-- Naming a malicious bash shell script as `invoice.png`
-- Relying on desktop file managers (like Windows Explorer, macOS Finder, or GNOME Nautilus)
-  which may hide extensions or associate icons based solely on name, while backend processes
-  or unaware users execute the payload.
-
-This module provides a pure-Python, zero-dependency binary signature scanner that reads only
-the initial header chunk (up to 4096 bytes) using defensive I/O patterns to categorize the file's
-true biological format regardless of what its filename claims.
+Program: Quarantine Sentinel - Binary Magic Signature & Header Analyzer
+Programmer: Ethan Kilmer
+Last Modified: 11/08/2026
+Purpose: Inspect initial binary header bytes to determine true biological file formats (ELF, PE, Mach-O, WASM, Shebang, PDF, ZIP, Images) independently of untrusted file extensions.
 """
 
 from __future__ import annotations
 
+## Standard binary parsing and data container libraries
 import struct
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+
+## ----------------------------------------------------------------------------
+## File Type Classification Enum
+## ----------------------------------------------------------------------------
 
 class FileTypeCategory(str, Enum):
     """
@@ -37,16 +26,37 @@ class FileTypeCategory(str, Enum):
     Categorization enables defensive policy engines to distinguish harmless passive media
     (images, text) from active execution vectors (compiled binaries, scripts, installers).
     """
-    EXECUTABLE = "executable"      # Machine code binaries (ELF, PE, Mach-O)
-    SCRIPT = "script"              # Interpreted scripts (bash, python, perl, powershell)
-    DOCUMENT = "document"          # Formatted office documents (PDF, DOCX, OLE, RTF)
-    IMAGE = "image"                # Raster/vector graphics (PNG, JPEG, GIF, BMP, SVG)
-    ARCHIVE = "archive"            # Compressed containers (ZIP, TAR, GZ, 7Z, BZ2, XZ)
-    AUDIO_VIDEO = "media"          # Media streams (MP3, MP4, WAV, AVI)
-    TEXT = "text"                  # Generic plaintext, source code, JSON, XML
-    DATA = "data"                  # Raw structured or arbitrary data
-    UNKNOWN = "unknown"            # Unrecognized binary or format
+    ## Compiled native machine code (ELF, PE, Mach-O, WebAssembly)
+    EXECUTABLE = "executable"
 
+    ## Interpreted scripting code (Bash, Python, Perl, Ruby, Node, Batch)
+    SCRIPT = "script"
+
+    ## Structured office documents and page description formats (PDF, DOCX, XLSX, OLE)
+    DOCUMENT = "document"
+
+    ## Raster and vector graphics formats (PNG, JPEG, GIF, BMP, TIFF, SVG)
+    IMAGE = "image"
+
+    ## Compressed archive containers (ZIP, GZIP, BZIP2, XZ, 7Z, TAR)
+    ARCHIVE = "archive"
+
+    ## Audio and video media containers (MP3, MP4, WAV, AVI)
+    AUDIO_VIDEO = "media"
+
+    ## Plain text documents, configuration files, and human-readable formats
+    TEXT = "text"
+
+    ## Structured or unstructured data blobs
+    DATA = "data"
+
+    ## Unrecognized or unclassified binary payloads
+    UNKNOWN = "unknown"
+
+
+## ----------------------------------------------------------------------------
+## Inspection Result Data Structure
+## ----------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class MagicInspectionResult:
@@ -59,16 +69,30 @@ class MagicInspectionResult:
         description: Human-readable technical description of the detected container/format.
         is_executable: True if format represents runnable machine code or interpreted instructions.
         magic_bytes_hex: Hexadecimal representation of the initial identifying bytes.
-        details: Deep architectural metadata extracted from the file headers (architecture,
-                 endianness, bitness, shebang interpreter path, etc.).
+        details: Deep architectural metadata extracted from the file headers.
     """
+    ## Standardized MIME type string
     mime_type: str
+
+    ## High-level threat assessment category
     category: FileTypeCategory
+
+    ## Descriptive summary of format architecture and sub-type
     description: str
+
+    ## Boolean indicating if payload can be executed by kernel or interpreter
     is_executable: bool
+
+    ## Hexadecimal string showing first 16 bytes for forensic audit logs
     magic_bytes_hex: str
+
+    ## Key-value architectural metadata dictionary
     details: Dict[str, Union[str, int, bool]] = field(default_factory=dict)
 
+
+## ----------------------------------------------------------------------------
+## Magic Inspection Engine
+## ----------------------------------------------------------------------------
 
 class MagicInspector:
     """
@@ -78,61 +102,92 @@ class MagicInspector:
     entire files into memory to avoid Denial-of-Service via ZIP bombs or multi-gigabyte memory exhaustion).
     """
 
-    # Maximum bytes needed to inspect headers (4096 bytes covers ELF, PE, Mach-O, and Zip manifests)
+    ## Bounded buffer limit: 4096 bytes covers headers for ELF, PE, Mach-O, and Zip manifests
     HEADER_READ_SIZE: int = 4096
 
-    # =========================================================================
-    # WELL-KNOWN BINARY SIGNATURE CONSTANTS (Offsets and Magic Byte Sequences)
-    # =========================================================================
+    ## =========================================================================
+    ## WELL-KNOWN BINARY SIGNATURE CONSTANTS
+    ## =========================================================================
 
-    # ELF (Executable and Linkable Format) - Standard on Linux, BSD, and Solaris
-    # Byte 0-3: 0x7F 'E' 'L' 'F' (\x7fELF)
+    ## Linux/Unix Executable and Linkable Format (ELF) signature: 0x7F 'E' 'L' 'F'
     ELF_MAGIC: bytes = b"\x7fELF"
 
-    # Microsoft PE (Portable Executable) - Used by DOS, Windows .exe, .dll, .sys
-    # Byte 0-1: 'M' 'Z' (Mark Zbikowski signature from DOS 2.0)
+    ## Microsoft DOS/PE executable stub signature: 'M' 'Z' (Mark Zbikowski)
     DOS_MZ_MAGIC: bytes = b"MZ"
 
-    # Apple Mach-O (Mach Object) - Used by macOS, iOS, Darwin
-    # 32-bit and 64-bit, Little Endian and Big Endian variants
-    MACHO_32_BE: bytes = b"\xfe\xed\xfa\xce"  # 0xFEEDFACE
-    MACHO_32_LE: bytes = b"\xce\xfa\xed\xfe"  # 0xCEFAEDFE
-    MACHO_64_BE: bytes = b"\xfe\xed\xfa\xcf"  # 0xFEEDFACF
-    MACHO_64_LE: bytes = b"\xcf\xfa\xed\xfe"  # 0xCFFAEDFE
-    MACHO_FAT_BE: bytes = b"\xca\xfe\xba\xbe" # 0xCAFEBABE (Universal fat binary)
-    MACHO_FAT_LE: bytes = b"\xbe\xba\xfe\xca" # 0xBEBAFECA
+    ## Apple Mach-O 32-bit Big Endian: 0xFEEDFACE
+    MACHO_32_BE: bytes = b"\xfe\xed\xfa\xce"
 
-    # WebAssembly (Wasm) Binary Format
-    # Byte 0-3: \x00 'a' 's' 'm'
+    ## Apple Mach-O 32-bit Little Endian: 0xCEFAEDFE
+    MACHO_32_LE: bytes = b"\xce\xfa\xed\xfe"
+
+    ## Apple Mach-O 64-bit Big Endian: 0xFEEDFACF
+    MACHO_64_BE: bytes = b"\xfe\xed\xfa\xcf"
+
+    ## Apple Mach-O 64-bit Little Endian: 0xCFFAEDFE
+    MACHO_64_LE: bytes = b"\xcf\xfa\xed\xfe"
+
+    ## Apple Universal Fat Binary Big Endian: 0xCAFEBABE (shared with Java class)
+    MACHO_FAT_BE: bytes = b"\xca\xfe\xba\xbe"
+
+    ## Apple Universal Fat Binary Little Endian: 0xBEBAFECA
+    MACHO_FAT_LE: bytes = b"\xbe\xba\xfe\xca"
+
+    ## WebAssembly (Wasm) Binary Format: 0x00 'a' 's' 'm'
     WASM_MAGIC: bytes = b"\x00asm"
 
-    # Script Interpreters: Shebang line
-    # Byte 0-1: '#' '!' (\x23\x21)
+    ## POSIX Shebang directive for interpreted executable scripts: '#' '!'
     SHEBANG_MAGIC: bytes = b"#!"
 
-    # Adobe Portable Document Format
+    ## Adobe Portable Document Format signature: '%PDF-'
     PDF_MAGIC: bytes = b"%PDF-"
 
-    # Standard Compressed Archives
-    ZIP_LOCAL_HEADER: bytes = b"PK\x03\x04"  # Standard zip entry header
-    ZIP_EMPTY_ARCHIVE: bytes = b"PK\x05\x06" # Empty zip directory record
-    ZIP_SPANNED: bytes = b"PK\x07\x08"       # Spanned archive marker
-    GZIP_MAGIC: bytes = b"\x1f\x8b"          # RFC 1952 gzip ID1 + ID2
-    BZIP2_MAGIC: bytes = b"BZh"              # 'B' 'Z' 'h' block-sorting compressor
-    XZ_MAGIC: bytes = b"\xfd7zXZ\x00"        # XZ stream format
-    SEVEN_ZIP_MAGIC: bytes = b"7z\xbc\xaf\x27\x1c" # 7-Zip header
-    TAR_USTAR_MAGIC: bytes = b"ustar"        # POSIX ustar at offset 257
+    ## Standard PKZip entry local file header: 'P' 'K' 0x03 0x04
+    ZIP_LOCAL_HEADER: bytes = b"PK\x03\x04"
 
-    # Standard Raster Image Formats
-    PNG_MAGIC: bytes = b"\x89PNG\r\n\x1a\n"  # 8-byte PNG header with DOS/Unix line break test
-    JPEG_SOI: bytes = b"\xff\xd8\xff"        # JPEG Start of Image (SOI) marker
-    GIF_87A: bytes = b"GIF87a"               # CompuServe GIF 1987
-    GIF_89A: bytes = b"GIF89a"               # CompuServe GIF 1989 (supports animation/transparency)
-    BMP_MAGIC: bytes = b"BM"                 # Windows Bitmap header
-    TIFF_LE: bytes = b"II*\x00"              # Intel Little-Endian TIFF
-    TIFF_BE: bytes = b"MM\x00*"              # Motorola Big-Endian TIFF
+    ## Empty ZIP archive end-of-central-directory: 'P' 'K' 0x05 0x06
+    ZIP_EMPTY_ARCHIVE: bytes = b"PK\x05\x06"
 
-    # Microsoft OLE Compound Document (Legacy DOC, XLS, PPT)
+    ## Spanned ZIP archive marker: 'P' 'K' 0x07 0x08
+    ZIP_SPANNED: bytes = b"PK\x07\x08"
+
+    ## GNU Zip (GZIP) RFC 1952 signature: 0x1F 0x8B
+    GZIP_MAGIC: bytes = b"\x1f\x8b"
+
+    ## BZip2 block compressor signature: 'B' 'Z' 'h'
+    BZIP2_MAGIC: bytes = b"BZh"
+
+    ## XZ stream format signature: 0xFD '7' 'z' 'X' 'Z' 0x00
+    XZ_MAGIC: bytes = b"\xfd7zXZ\x00"
+
+    ## 7-Zip compressed archive signature: '7' 'z' 0xBC 0xAF 0x27 0x1C
+    SEVEN_ZIP_MAGIC: bytes = b"7z\xbc\xaf\x27\x1c"
+
+    ## POSIX TAR ustar archive magic at offset 257: 'ustar'
+    TAR_USTAR_MAGIC: bytes = b"ustar"
+
+    ## PNG image signature with DOS/Unix line-break validation sequence
+    PNG_MAGIC: bytes = b"\x89PNG\r\n\x1a\n"
+
+    ## JPEG Start-Of-Image (SOI) marker: 0xFF 0xD8 0xFF
+    JPEG_SOI: bytes = b"\xff\xd8\xff"
+
+    ## CompuServe GIF 1987 format
+    GIF_87A: bytes = b"GIF87a"
+
+    ## CompuServe GIF 1989 format (transparency and animation support)
+    GIF_89A: bytes = b"GIF89a"
+
+    ## Windows Bitmap (BMP) signature: 'B' 'M'
+    BMP_MAGIC: bytes = b"BM"
+
+    ## Tagged Image File Format (TIFF) Little Endian: 'I' 'I' 0x2A 0x00
+    TIFF_LE: bytes = b"II*\x00"
+
+    ## Tagged Image File Format (TIFF) Big Endian: 'M' 'M' 0x00 0x2A
+    TIFF_BE: bytes = b"MM\x00*"
+
+    ## Microsoft OLE Compound Document (legacy DOC, XLS, PPT, MSI)
     OLE_COMPOUND_MAGIC: bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
     @classmethod
@@ -142,7 +197,7 @@ class MagicInspector:
 
         This is a pure deterministic classification function with zero side effects.
         """
-        # If payload is completely empty, it's a 0-byte file
+        ## Check if payload contains zero bytes (empty file)
         if not header:
             return MagicInspectionResult(
                 mime_type="application/x-empty",
@@ -153,34 +208,35 @@ class MagicInspector:
                 details={"file_size": 0},
             )
 
-        # Capture first 16 bytes as hex representation for audit logging
+        ## Capture up to first 16 bytes as spaced hex string for forensic receipts
         hex_preview = header[:16].hex(" ")
 
-        # ---------------------------------------------------------------------
-        # 1. LINUX / UNIX ELF BINARY PARSING
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 1. Linux/Unix ELF Binaries
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.ELF_MAGIC):
             return cls._parse_elf_header(header, hex_preview)
 
-        # ---------------------------------------------------------------------
-        # 2. MICROSOFT WINDOWS PE / DOS MZ BINARY PARSING
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 2. Microsoft Windows PE / DOS Binaries
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.DOS_MZ_MAGIC):
             pe_result = cls._parse_pe_header(header, hex_preview)
             if pe_result is not None:
                 return pe_result
 
-        # ---------------------------------------------------------------------
-        # 3. APPLE MACOS / IOS MACH-O BINARY PARSING
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 3. Apple macOS / iOS Mach-O Binaries
+        ## ---------------------------------------------------------------------
         macho_result = cls._parse_macho_header(header, hex_preview)
         if macho_result is not None:
             return macho_result
 
-        # ---------------------------------------------------------------------
-        # 4. WEBASSEMBLY (WASM) BINARY PARSING
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 4. WebAssembly (WASM) Modules
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.WASM_MAGIC):
+            ## Unpack little-endian 32-bit module version from offset 4
             wasm_version = struct.unpack("<I", header[4:8])[0] if len(header) >= 8 else 1
             return MagicInspectionResult(
                 mime_type="application/wasm",
@@ -191,17 +247,17 @@ class MagicInspector:
                 details={"format": "WebAssembly", "version": wasm_version},
             )
 
-        # ---------------------------------------------------------------------
-        # 5. POSIX INTERPRETED SCRIPTS (SHEBANG #!)
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 5. POSIX Interpreted Scripts (Shebang #!)
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.SHEBANG_MAGIC):
             return cls._parse_shebang(header, hex_preview)
 
-        # ---------------------------------------------------------------------
-        # 6. ADOBE PDF DOCUMENTS
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 6. Adobe PDF Documents
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.PDF_MAGIC):
-            # Extract PDF version e.g. %PDF-1.7
+            ## Extract PDF version header string from first line
             first_line = header.split(b"\n", 1)[0].decode("ascii", errors="replace").strip()
             return MagicInspectionResult(
                 mime_type="application/pdf",
@@ -212,9 +268,9 @@ class MagicInspector:
                 details={"version_header": first_line},
             )
 
-        # ---------------------------------------------------------------------
-        # 7. ARCHIVES & COMPRESSED CONTAINERS
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 7. Compressed Archives and Containers
+        ## ---------------------------------------------------------------------
         if header.startswith((cls.ZIP_LOCAL_HEADER, cls.ZIP_EMPTY_ARCHIVE, cls.ZIP_SPANNED)):
             return cls._parse_zip_container(header, hex_preview)
 
@@ -258,7 +314,7 @@ class MagicInspector:
                 details={"format": "7z"},
             )
 
-        # POSIX Tar check (ustar magic string at offset 257)
+        ## Check POSIX ustar tar header signature located at offset 257
         if len(header) >= 262 and header[257:262] == cls.TAR_USTAR_MAGIC:
             return MagicInspectionResult(
                 mime_type="application/x-tar",
@@ -269,9 +325,9 @@ class MagicInspector:
                 details={"format": "ustar"},
             )
 
-        # ---------------------------------------------------------------------
-        # 8. RASTER & VECTOR IMAGES
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 8. Raster and Vector Images
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.PNG_MAGIC):
             return MagicInspectionResult(
                 mime_type="image/png",
@@ -324,9 +380,9 @@ class MagicInspector:
                 details={"format": "TIFF", "endianness": endianness},
             )
 
-        # ---------------------------------------------------------------------
-        # 9. MICROSOFT LEGACY OLE COMPOUND DOCUMENTS
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 9. Microsoft Legacy OLE Compound Documents
+        ## ---------------------------------------------------------------------
         if header.startswith(cls.OLE_COMPOUND_MAGIC):
             return MagicInspectionResult(
                 mime_type="application/x-ole-storage",
@@ -337,16 +393,16 @@ class MagicInspector:
                 details={"format": "OLECF"},
             )
 
-        # ---------------------------------------------------------------------
-        # 10. TEXT / PLAINTEXT HEURISTICS
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 10. Plaintext and Source Code Heuristics
+        ## ---------------------------------------------------------------------
         text_result = cls._inspect_plaintext_heuristics(header, hex_preview)
         if text_result is not None:
             return text_result
 
-        # ---------------------------------------------------------------------
-        # 11. UNKNOWN BINARY DATA
-        # ---------------------------------------------------------------------
+        ## ---------------------------------------------------------------------
+        ## 11. Unidentified Binary Payload Fallback
+        ## ---------------------------------------------------------------------
         return MagicInspectionResult(
             mime_type="application/octet-stream",
             category=FileTypeCategory.UNKNOWN,
@@ -366,19 +422,21 @@ class MagicInspector:
         2. Handles permission errors and broken symlinks gracefully.
         3. Uses context manager for immediate descriptor closure.
         """
+        ## Resolve path to concrete local path
         file_path = Path(path)
 
-        # Defense: Verify file exists and is accessible
+        ## Defensive check: Verify file exists and is a regular file
         if not file_path.is_file():
             raise FileNotFoundError(f"Target path does not exist or is not a regular file: {file_path}")
 
         try:
-            # Read first 4KB using binary mode
+            ## Read first 4096 bytes using binary mode
             with open(file_path, "rb") as f:
                 header = f.read(cls.HEADER_READ_SIZE)
+            ## Classify header bytes
             return cls.inspect_bytes(header)
         except PermissionError as pe:
-            # Security boundary: If read permissions are denied, flag as inaccessible
+            ## Security boundary: If read permissions are denied, flag as inaccessible
             return MagicInspectionResult(
                 mime_type="application/x-inaccessible",
                 category=FileTypeCategory.UNKNOWN,
@@ -388,25 +446,19 @@ class MagicInspector:
                 details={"error": "PermissionError"},
             )
 
-    # =========================================================================
-    # LOW-LEVEL FORMAT PARSERS (Educational System Deep Dives)
-    # =========================================================================
+    ## =========================================================================
+    ## LOW-LEVEL FORMAT PARSERS
+    ## =========================================================================
 
     @classmethod
     def _parse_elf_header(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Parse POSIX Executable and Linkable Format (ELF) header fields.
-
-        ELF Header Structure (from /usr/include/elf.h):
-        - e_ident[4] (EI_CLASS): 1 = 32-bit architecture, 2 = 64-bit architecture
-        - e_ident[5] (EI_DATA): 1 = 2's complement little-endian, 2 = 2's complement big-endian
-        - e_ident[6] (EI_VERSION): 1 = Current ELF standard version
-        - e_ident[7] (EI_OSABI): Target Operating System ABI (0=SysV, 3=Linux, 9=FreeBSD)
-        - e_type (offset 16, 2 bytes): 1=ET_REL (.o), 2=ET_EXEC (executable), 3=ET_DYN (.so or PIE binary)
         """
+        ## Initialize metadata dictionary
         details: Dict[str, Union[str, int, bool]] = {"format": "ELF"}
 
-        # Extract bitness (Byte 4)
+        ## Extract bitness from e_ident[4] (EI_CLASS: 1=32-bit, 2=64-bit)
         if len(header) > 4:
             ei_class = header[4]
             if ei_class == 1:
@@ -416,8 +468,8 @@ class MagicInspector:
                 details["bitness"] = 64
                 details["arch_class"] = "ELF64"
 
-        # Extract endianness (Byte 5)
-        endian = "<"  # default little endian
+        ## Extract endianness from e_ident[5] (EI_DATA: 1=little-endian, 2=big-endian)
+        endian = "<"  ## Default little-endian
         if len(header) > 5:
             ei_data = header[5]
             if ei_data == 1:
@@ -427,12 +479,12 @@ class MagicInspector:
                 details["endianness"] = "big-endian"
                 endian = ">"
 
-        # Extract OS/ABI (Byte 7)
+        ## Extract OS/ABI from e_ident[7] (EI_OSABI)
         if len(header) > 7:
             abi_map = {0: "System V", 3: "Linux", 6: "Solaris", 9: "FreeBSD", 97: "ARM"}
             details["os_abi"] = abi_map.get(header[7], f"Unknown (0x{header[7]:02x})")
 
-        # Extract e_type (offset 16, uint16)
+        ## Extract e_type from offset 16 (uint16)
         if len(header) >= 18:
             e_type = struct.unpack(f"{endian}H", header[16:18])[0]
             type_map = {
@@ -443,6 +495,7 @@ class MagicInspector:
             }
             details["elf_type"] = type_map.get(e_type, f"Unknown ({e_type})")
 
+        ## Compose descriptive architecture string
         arch_desc = f"{details.get('arch_class', 'ELF')} ({details.get('elf_type', 'executable')})"
         return MagicInspectionResult(
             mime_type="application/x-executable-elf",
@@ -457,17 +510,12 @@ class MagicInspector:
     def _parse_pe_header(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Parse Microsoft Portable Executable (PE) headers.
-
-        Windows binaries start with a legacy MS-DOS 2.0 stub beginning with 'MZ' (0x4D 0x5A).
-        At offset 0x3C (60 bytes) is a 4-byte little-endian integer (`e_lfanew`) pointing
-        to the location of the true NT PE header. The PE header must start with the
-        magic signature 'PE\\0\\0' (0x50 0x45 0x00 0x00).
         """
+        ## Initialize metadata dictionary
         details: Dict[str, Union[str, int, bool]] = {"format": "PE"}
 
-        # Check if file has enough bytes to contain the e_lfanew pointer (offset 0x3C to 0x40)
+        ## Check if file is too small to contain e_lfanew pointer (offset 0x3C to 0x40)
         if len(header) < 0x40:
-            # Short MZ file - DOS executable or stub
             return MagicInspectionResult(
                 mime_type="application/x-dosexec",
                 category=FileTypeCategory.EXECUTABLE,
@@ -477,16 +525,15 @@ class MagicInspector:
                 details=details,
             )
 
-        # Unpack e_lfanew (pointer to PE header)
+        ## Unpack 32-bit little-endian e_lfanew offset pointing to NT PE header
         pe_offset = struct.unpack("<I", header[0x3C:0x40])[0]
         details["pe_offset"] = pe_offset
 
-        # Verify PE signature at indicated offset
+        ## Verify PE signature 'PE\0\0' at the unpacked offset
         if len(header) >= pe_offset + 4 and header[pe_offset:pe_offset + 4] == b"PE\x00\x00":
-            # Target is a confirmed Win32/Win64 PE executable
             details["has_pe_signature"] = True
 
-            # Machine type is at pe_offset + 4 (uint16)
+            ## Unpack machine architecture type at pe_offset + 4 (uint16)
             if len(header) >= pe_offset + 6:
                 machine_type = struct.unpack("<H", header[pe_offset + 4:pe_offset + 6])[0]
                 machine_map = {
@@ -497,8 +544,8 @@ class MagicInspector:
                 }
                 details["machine"] = machine_map.get(machine_type, f"Unknown (0x{machine_type:04X})")
 
-            # Characteristics flag is at pe_offset + 22 (uint16)
-            # 0x2000 = DLL (IMAGE_FILE_DLL), 0x0002 = EXECUTABLE_IMAGE
+            ## Unpack characteristics flags at pe_offset + 22 (uint16)
+            ## 0x2000 = IMAGE_FILE_DLL, 0x0002 = IMAGE_FILE_EXECUTABLE_IMAGE
             if len(header) >= pe_offset + 24:
                 characteristics = struct.unpack("<H", header[pe_offset + 22:pe_offset + 24])[0]
                 is_dll = bool(characteristics & 0x2000)
@@ -516,7 +563,7 @@ class MagicInspector:
                 details=details,
             )
 
-        # Fallback: file begins with 'MZ' but lacks PE signature (legacy 16-bit DOS or truncated)
+        ## Fallback: Beginning with MZ but lacking PE header is legacy DOS executable
         return MagicInspectionResult(
             mime_type="application/x-dosexec",
             category=FileTypeCategory.EXECUTABLE,
@@ -530,12 +577,8 @@ class MagicInspector:
     def _parse_macho_header(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Parse Apple Mach-O binaries (macOS / iOS executables, dylibs, bundles).
-
-        Mach-O uses 4-byte magic headers distinguishing 32-bit vs 64-bit architectures
-        and endianness. It also supports Fat Universal binaries packing multiple architectures
-        (e.g., x86_64 + ARM64 Apple Silicon) under the signature 0xCAFEBABE or 0xBEBAFECA.
         """
-        # 64-bit Mach-O Little-Endian (Standard on Modern macOS x86_64 and arm64)
+        ## 64-bit Mach-O Little-Endian (Standard Apple Silicon & Intel macOS)
         if header.startswith(cls.MACHO_64_LE):
             return MagicInspectionResult(
                 mime_type="application/x-mach-binary",
@@ -546,7 +589,7 @@ class MagicInspector:
                 details={"format": "Mach-O", "bitness": 64, "endianness": "little-endian"},
             )
 
-        # 64-bit Mach-O Big-Endian
+        ## 64-bit Mach-O Big-Endian
         if header.startswith(cls.MACHO_64_BE):
             return MagicInspectionResult(
                 mime_type="application/x-mach-binary",
@@ -557,7 +600,7 @@ class MagicInspector:
                 details={"format": "Mach-O", "bitness": 64, "endianness": "big-endian"},
             )
 
-        # 32-bit Mach-O Little-Endian
+        ## 32-bit Mach-O Little-Endian
         if header.startswith(cls.MACHO_32_LE):
             return MagicInspectionResult(
                 mime_type="application/x-mach-binary",
@@ -568,7 +611,7 @@ class MagicInspector:
                 details={"format": "Mach-O", "bitness": 32, "endianness": "little-endian"},
             )
 
-        # 32-bit Mach-O Big-Endian
+        ## 32-bit Mach-O Big-Endian
         if header.startswith(cls.MACHO_32_BE):
             return MagicInspectionResult(
                 mime_type="application/x-mach-binary",
@@ -579,12 +622,10 @@ class MagicInspector:
                 details={"format": "Mach-O", "bitness": 32, "endianness": "big-endian"},
             )
 
-        # Fat Universal Binary (0xCAFEBABE or 0xBEBAFECA)
-        # Note: 0xCAFEBABE is shared with Java .class files.
-        # We differentiate by checking bytes 4-8: In Java class files, bytes 4-5 are minor_version
-        # and 6-7 are major_version (>= 45 for Java 1.1+). In Mach-O, bytes 4-7 are nfat_arch (uint32).
+        ## Fat Universal Binary (0xCAFEBABE) - differentiate from Java class files
         if header.startswith(cls.MACHO_FAT_BE):
             if len(header) >= 8:
+                ## Java class files store major_version (uint16) at bytes 6-8
                 major_version = struct.unpack(">H", header[6:8])[0]
                 if 45 <= major_version <= 70:
                     return MagicInspectionResult(
@@ -596,7 +637,7 @@ class MagicInspector:
                         details={"format": "Java .class", "major_version": major_version},
                     )
 
-            # Otherwise, it's an Apple Mach-O Universal Fat Binary
+            ## Otherwise confirmed Apple Mach-O Universal Fat Binary
             return MagicInspectionResult(
                 mime_type="application/x-mach-binary",
                 category=FileTypeCategory.EXECUTABLE,
@@ -606,6 +647,7 @@ class MagicInspector:
                 details={"format": "Mach-O Fat", "endianness": "big-endian"},
             )
 
+        ## Little-endian Fat Universal Binary
         if header.startswith(cls.MACHO_FAT_LE):
             return MagicInspectionResult(
                 mime_type="application/x-mach-binary",
@@ -622,15 +664,14 @@ class MagicInspector:
     def _parse_shebang(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Parse POSIX Shebang (`#!`) interpreter directive.
-
-        When an executable script is invoked on Linux/macOS, the kernel's binfmt_script handler
-        reads the first line to identify the interpreter path (e.g., #!/bin/bash, #!/usr/bin/env python3).
-        This makes scripts weaponizable execution vectors even without an extension.
         """
+        ## Extract the entire first line up to newline
         first_line = header.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
+
+        ## Strip the leading '#!' characters
         interpreter = first_line[2:].strip()
 
-        # Classify script type based on interpreter binary name
+        ## Classify script category based on interpreter path keywords
         lower_interp = interpreter.lower()
         script_type = "Generic shell script"
         mime = "text/x-shellscript"
@@ -665,15 +706,12 @@ class MagicInspector:
     def _parse_zip_container(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Inspect PKZip containers to distinguish generic ZIPs from Office documents (DOCX/XLSX/PPTX) or JARs.
-
-        Modern Microsoft Office documents (.docx, .xlsx, .pptx) are Open Packaging Conventions (OPC)
-        ZIP archives containing XML parts. Attackers frequently disguise malicious scripts or executables
-        as .docx or .xlsx. Conversely, checking internal paths like '[Content_Types].xml' verifies genuine Office documents.
         """
         details: Dict[str, Union[str, int, bool]] = {"format": "ZIP"}
 
-        # Search within the header chunk for Office or Java manifest signatures
+        ## Inspect header chunk for Open Packaging Conventions XML signatures
         if b"[Content_Types].xml" in header:
+            ## Word Document marker
             if b"word/" in header:
                 return MagicInspectionResult(
                     mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -683,6 +721,7 @@ class MagicInspector:
                     magic_bytes_hex=hex_preview,
                     details={"format": "DOCX", "container": "ZIP"},
                 )
+            ## Excel Spreadsheet marker
             if b"xl/" in header:
                 return MagicInspectionResult(
                     mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -692,6 +731,7 @@ class MagicInspector:
                     magic_bytes_hex=hex_preview,
                     details={"format": "XLSX", "container": "ZIP"},
                 )
+            ## PowerPoint Presentation marker
             if b"ppt/" in header:
                 return MagicInspectionResult(
                     mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -702,6 +742,7 @@ class MagicInspector:
                     details={"format": "PPTX", "container": "ZIP"},
                 )
 
+        ## Java Archive manifest signature
         if b"META-INF/MANIFEST.MF" in header:
             return MagicInspectionResult(
                 mime_type="application/java-archive",
@@ -712,6 +753,7 @@ class MagicInspector:
                 details={"format": "JAR", "container": "ZIP"},
             )
 
+        ## Standard generic ZIP archive
         return MagicInspectionResult(
             mime_type="application/zip",
             category=FileTypeCategory.ARCHIVE,
@@ -725,19 +767,16 @@ class MagicInspector:
     def _inspect_plaintext_heuristics(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Analyze whether buffer is plaintext, source code, or text script.
-
-        Heuristic:
-        Binary files typically contain null bytes (`\\x00`) or a high ratio of non-printable
-        control characters (outside ASCII 9-13, 32-126). Plaintext files lack null bytes
-        and decode cleanly as UTF-8 or ASCII.
         """
-        # If null byte exists in initial chunk, it is almost certainly a binary format
+        ## If null byte exists in initial chunk, it is almost certainly a binary format
         if b"\x00" in header:
             return None
 
+        ## Attempt UTF-8 decode
         try:
             decoded = header.decode("utf-8")
         except UnicodeDecodeError:
+            ## Fallback to Latin-1
             try:
                 decoded = header.decode("latin-1")
             except UnicodeDecodeError:
@@ -746,7 +785,7 @@ class MagicInspector:
         stripped = decoded.strip()
         lower_stripped = stripped.lower()
 
-        # Batch script detection
+        ## Windows Batch script detection
         if lower_stripped.startswith("@echo") or lower_stripped.startswith("rem "):
             return MagicInspectionResult(
                 mime_type="text/x-msdos-batch",
@@ -757,7 +796,7 @@ class MagicInspector:
                 details={"format": "Batch"},
             )
 
-        # HTML / XML / SVG detection
+        ## HTML hypertext detection
         if stripped.startswith("<!DOCTYPE html") or stripped.startswith("<html"):
             return MagicInspectionResult(
                 mime_type="text/html",
@@ -768,6 +807,7 @@ class MagicInspector:
                 details={"format": "HTML"},
             )
 
+        ## XML and SVG vector graphics detection
         if stripped.startswith("<?xml") or stripped.startswith("<svg"):
             mime = "image/svg+xml" if "<svg" in stripped else "text/xml"
             cat = FileTypeCategory.IMAGE if "<svg" in stripped else FileTypeCategory.DOCUMENT
@@ -780,7 +820,7 @@ class MagicInspector:
                 details={"format": "XML/SVG"},
             )
 
-        # JSON detection
+        ## JSON structured data detection
         if (stripped.startswith("{") and "}" in stripped) or (stripped.startswith("[") and "]" in stripped):
             return MagicInspectionResult(
                 mime_type="application/json",
@@ -791,7 +831,7 @@ class MagicInspector:
                 details={"format": "JSON"},
             )
 
-        # Generic plaintext
+        ## Generic UTF-8 / ASCII plaintext document
         return MagicInspectionResult(
             mime_type="text/plain",
             category=FileTypeCategory.TEXT,
