@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quarantine-sentinel"
 version = "1.0.0"
-description = "Zero-dependency offline file security scanner and automated quarantine sentinel for isolating disguised binaries, double extensions, and malicious downloads."
+description = "Project exploring file inspection and quarantine workflows."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -25,7 +25,6 @@ keywords = [
     "posix-security",
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: System Administrators",
     "Intended Audience :: Information Technology",
     "Intended Audience :: Developers",
