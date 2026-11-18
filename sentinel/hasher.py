@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - hasher.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Computes SHA-256, SHA-512 and MD5 digests of a file in 64 KiB streaming chunks and packages them with the file size in a HashManifest.
+
 """
-Program: Quarantine Sentinel - Streaming Cryptographic Multi-Hasher
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Compute simultaneous SHA-256, SHA-512, and MD5 cryptographic digests using bounded 64KB streaming buffers to prevent memory exhaustion and establish immutable file integrity.
+Compute simultaneous SHA-256, SHA-512, and MD5 cryptographic digests using bounded 64KB streaming buffers to prevent memory exhaustion and establish immutable file integrity.
 """
 
 from __future__ import annotations

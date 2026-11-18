@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - cli.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Command-line interface: defines the scan, quarantine, receipts, receipt, restore and verify commands, prints colored (TTY-aware) or JSON output, and returns exit codes.
+
 """
-Program: Quarantine Sentinel - Command-Line Interface (CLI)
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Provide a POSIX-standard CLI with TTY-aware colorized output and structured JSON export for scanning files, isolating threats into the vault, viewing receipts, verifying integrity, and restoring files.
+Provide a POSIX-standard CLI with TTY-aware colorized output and structured JSON export for scanning files, isolating threats into the vault, viewing receipts, verifying integrity, and restoring files.
 """
 
 from __future__ import annotations

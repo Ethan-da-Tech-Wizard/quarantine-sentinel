@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - magic.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Reads a file's leading bytes to identify its true format (ELF, PE, Mach-O, scripts, documents, images, archives and more) regardless of its file extension.
+
 """
-Program: Quarantine Sentinel - Binary Magic Signature & Header Analyzer
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Inspect initial binary header bytes to determine true biological file formats (ELF, PE, Mach-O, WASM, Shebang, PDF, ZIP, Images) independently of untrusted file extensions.
+Inspect initial binary header bytes to determine true biological file formats (ELF, PE, Mach-O, WASM, Shebang, PDF, ZIP, Images) independently of untrusted file extensions.
 """
 
 from __future__ import annotations

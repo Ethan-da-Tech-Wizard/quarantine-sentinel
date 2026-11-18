@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - __init__.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Package entry point: re-exports the public classes (inspector, hasher, threat engine, vault) and defines version, author and license metadata.
+
 """
-Program: Quarantine Sentinel - Package Interface & Public Exports
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Provide the top-level package interface, version metadata, and clean public symbol exports for Quarantine Sentinel.
+Provide the top-level package interface, version metadata, and clean public symbol exports for Quarantine Sentinel.
 """
 
 ## ----------------------------------------------------------------------------

@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - test_sentinel.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Unit tests covering the magic inspector, hasher, threat rules, quarantine vault and CLI of quarantine-sentinel.
+
 """
-Program: Quarantine Sentinel - Automated Test Suite
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Comprehensive verification suite validating binary signature parsing, cryptographic hashing, heuristic threat detection, quarantine isolation, vault tamper auditing, and CLI integration.
+Comprehensive verification suite validating binary signature parsing, cryptographic hashing, heuristic threat detection, quarantine isolation, vault tamper auditing, and CLI integration.
 """
 
 ## Standard testing, filesystem, hashing, and binary packing utilities
@@ -184,10 +186,12 @@ class TestCryptoHasher(unittest.TestCase):
     """Test suite for streaming cryptographic multi-hash calculations."""
 
     def setUp(self) -> None:
+        """Runs before each test: build fresh temporary state."""
         ## Create temporary directory for scratch files
         self.temp_dir = tempfile.mkdtemp()
 
     def tearDown(self) -> None:
+        """Runs after each test: delete the temporary files."""
         ## Clean up temporary test files
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
@@ -248,10 +252,12 @@ class TestThreatEngine(unittest.TestCase):
     """Test suite for threat detection rules and heuristics."""
 
     def setUp(self) -> None:
+        """Runs before each test: build fresh temporary state."""
         ## Create scratch environment
         self.temp_dir = tempfile.mkdtemp()
 
     def tearDown(self) -> None:
+        """Runs after each test: delete the temporary files."""
         ## Remove scratch environment
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
@@ -375,12 +381,14 @@ class TestQuarantineVault(unittest.TestCase):
     """Test suite for quarantine vault isolation, permission stripping, and audit receipts."""
 
     def setUp(self) -> None:
+        """Runs before each test: build fresh temporary state."""
         ## Initialize isolated vault directory
         self.temp_dir = tempfile.mkdtemp()
         self.vault_dir = Path(self.temp_dir) / "vault"
         self.vault = QuarantineVault(vault_dir=self.vault_dir)
 
     def tearDown(self) -> None:
+        """Runs after each test: delete the temporary files."""
         ## Teardown temporary directory
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
@@ -471,11 +479,13 @@ class TestCLIIntegration(unittest.TestCase):
     """Test suite for CLI subcommands."""
 
     def setUp(self) -> None:
+        """Runs before each test: build fresh temporary state."""
         ## Initialize scratch CLI testing environment
         self.temp_dir = tempfile.mkdtemp()
         self.vault_dir = Path(self.temp_dir) / "cli_vault"
 
     def tearDown(self) -> None:
+        """Runs after each test: delete the temporary files."""
         ## Clean up scratch directory
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 

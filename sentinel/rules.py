@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - rules.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Threat heuristics: combines magic-byte results, hashes and filename/permission checks (disguised binaries, double extensions, Unicode tricks, shebangs) into a scored ThreatReport.
+
 """
-Program: Quarantine Sentinel - Threat Detection & Heuristic Rules Engine
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Evaluate untrusted files against forensic security heuristics including binary masquerading, double extension camouflage, Unicode RLO/zero-width attacks, shebang disguises, and POSIX permission anomalies.
+Evaluate untrusted files against forensic security heuristics including binary masquerading, double extension camouflage, Unicode RLO/zero-width attacks, shebang disguises, and POSIX permission anomalies.
 """
 
 from __future__ import annotations
