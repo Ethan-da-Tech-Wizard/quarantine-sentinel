@@ -1,8 +1,10 @@
+# Program: quarantine-sentinel - vault.py
+# Programmer: Ethan-da-Tech-Wizard (written with Claude, an AI assistant)
+# Last Modified: 2026-11-18
+# Purpose: Quarantine vault: moves suspicious files into a restricted directory, strips their permissions, writes JSON audit receipts, and supports integrity checks and verified restore.
+
 """
-Program: Quarantine Sentinel - Atomic Quarantine Vault & Receipt Issuer
-Programmer: Ethan Kilmer
-Last Modified: 11/08/2026
-Purpose: Safely isolate suspicious payloads into an access-restricted vault, neutralize execution vectors via POSIX chmod 000, issue cryptographically verifiable JSON audit receipts, and support tamper-evident restoration.
+Safely isolate suspicious payloads into an access-restricted vault, neutralize execution vectors via POSIX chmod 000, issue cryptographically verifiable JSON audit receipts, and support tamper-evident restoration.
 """
 
 from __future__ import annotations
