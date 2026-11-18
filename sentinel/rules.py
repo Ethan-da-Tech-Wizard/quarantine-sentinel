@@ -1,3 +1,13 @@
+# ==============================================================================
+# Program: rules.py
+# Programmer: Ethan-da-Tech-Wizard
+# Course: CIS 156 / Advanced Systems
+# Last Modified: November 18, 2026
+# Purpose: Heuristic threat detection and security rules evaluation engine.
+#          Scans files for binary masquerade attacks, double extension camouflage,
+#          Unicode Right-to-Left Override (RLO) obfuscation, zero-width characters,
+#          hidden script shebangs, and anomalous POSIX permission bits.
+# ==============================================================================
 """
 Program: Quarantine Sentinel - Threat Detection & Heuristic Rules Engine
 Programmer: Ethan Kilmer
