@@ -1,7 +1,11 @@
+# Build system (PEP 517/518): pip installs setuptools >= 61 (first release with full [project] support) and builds
+# with its standard backend.
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+# Core metadata. Zero runtime dependencies on purpose: a security tool that inspects untrusted files should not pull in
+# third-party parsers. 3.9 is the minimum supported interpreter.
 [project]
 name = "quarantine-sentinel"
 version = "1.0.0"
@@ -12,6 +16,7 @@ license = { text = "MIT" }
 authors = [
     { name = "Ethan Kilmer", email = "ethan@twu.software" }
 ]
+# Search keywords for package indexes (no effect on behaviour).
 keywords = [
     "security",
     "quarantine",
@@ -24,6 +29,7 @@ keywords = [
     "zero-dependency",
     "posix-security",
 ]
+# Trove classifiers: audience, topic, supported Python versions and POSIX-style platforms.
 classifiers = [
     "Intended Audience :: System Administrators",
     "Intended Audience :: Information Technology",
@@ -41,16 +47,20 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
 ]
+# Intentionally empty (see [project] note above).
 dependencies = []
 
+# Installs a `sentinel` command that calls sentinel.cli:main (also reachable as `python -m sentinel`).
 [project.scripts]
 sentinel = "sentinel.cli:main"
 
+# Links rendered on the project page.
 [project.urls]
 Homepage = "https://github.com/Ethan-da-Tech-Wizard/quarantine-sentinel"
 Repository = "https://github.com/Ethan-da-Tech-Wizard/quarantine-sentinel"
 Issues = "https://github.com/Ethan-da-Tech-Wizard/quarantine-sentinel/issues"
 
+# Package only sentinel/ (and subpackages); tests are not installed.
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sentinel*"]
