@@ -1,7 +1,6 @@
 # ==============================================================================
 # Program: test_sentinel.py
 # Programmer: Ethan-da-Tech-Wizard
-# Course: CIS 156 / Advanced Systems
 # Last Modified: November 18, 2026
 # Purpose: Automated unit and integration test suite for Quarantine Sentinel.
 #          Validates magic byte parsing, streaming cryptographic hashing,

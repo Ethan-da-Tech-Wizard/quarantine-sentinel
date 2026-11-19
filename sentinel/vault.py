@@ -1,7 +1,6 @@
 # ==============================================================================
 # Program: vault.py
 # Programmer: Ethan-da-Tech-Wizard
-# Course: CIS 156 / Advanced Systems
 # Last Modified: November 18, 2026
 # Purpose: Atomic quarantine isolation vault and forensic receipt issuer.
 #          Neutralizes suspicious executable files by revoking permissions (chmod 000),

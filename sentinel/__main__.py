@@ -1,7 +1,6 @@
 # ==============================================================================
 # Program: __main__.py
 # Programmer: Ethan-da-Tech-Wizard
-# Course: CIS 156 / Advanced Systems
 # Last Modified: November 18, 2026
 # Purpose: Executable entrypoint for Quarantine Sentinel module execution.
 #          Facilitates execution via `python3 -m sentinel` by routing command-line
