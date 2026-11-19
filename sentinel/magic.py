@@ -693,9 +693,8 @@ class MagicInspector:
         return None
 
     @classmethod
-    # The interpreter is classified by substring on the lowercased shebang line, tested
-    # in order (bash, then 'sh', python, perl, ruby, node). Because 'sh' is a plain
-    # substring test, an interpreter path merely containing 'sh' is labeled POSIX shell.
+    # The interpreter program name (basename, after resolving "env") is matched exactly
+    # (bash, the sh family, python*, perl*, ruby*, node); unknown programs stay generic.
     def _parse_shebang(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Parse POSIX Shebang (`#!`) interpreter directive.
@@ -706,25 +705,30 @@ class MagicInspector:
         ## Strip the leading '#!' characters
         interpreter = first_line[2:].strip()
 
-        ## Classify script category based on interpreter path keywords
-        lower_interp = interpreter.lower()
+        ## Classify script category by the interpreter's program name (basename), not by
+        ## substring: "fish" or "/opt/ashley/x" contain "sh" but are not POSIX shells.
+        ## Skip a leading "env" (and its flags / VAR=value words) to reach the real program.
+        words = interpreter.split()
+        if words and words[0].rsplit("/", 1)[-1].lower() == "env":
+            words = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+        program = words[0].rsplit("/", 1)[-1].lower() if words else ""
         script_type = "Generic shell script"
         mime = "text/x-shellscript"
 
-        if "bash" in lower_interp:
+        if program == "bash":
             script_type = "GNU Bash script"
-        elif "sh" in lower_interp:
+        elif program in ("sh", "dash", "ash", "ksh", "zsh"):
             script_type = "POSIX Shell script"
-        elif "python" in lower_interp:
+        elif program.startswith("python"):
             script_type = "Python script"
             mime = "text/x-python"
-        elif "perl" in lower_interp:
+        elif program.startswith("perl"):
             script_type = "Perl script"
             mime = "text/x-perl"
-        elif "ruby" in lower_interp:
+        elif program.startswith("ruby"):
             script_type = "Ruby script"
             mime = "text/x-ruby"
-        elif "node" in lower_interp:
+        elif program in ("node", "nodejs"):
             script_type = "Node.js JavaScript script"
             mime = "application/javascript"
 
