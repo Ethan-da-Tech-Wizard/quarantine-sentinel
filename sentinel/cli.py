@@ -26,6 +26,8 @@ from typing import List, Optional
 
 ## Import package version and core sentinel engines
 from sentinel import __version__
+# Only the engines the CLI drives are imported: ThreatEngine scores files (MagicInspector is used
+# inside it), QuarantineVault owns every filesystem mutation.
 from sentinel.magic import MagicInspector
 from sentinel.rules import RiskLevel, ThreatEngine, ThreatReport
 from sentinel.vault import QuarantineReceipt, QuarantineVault
@@ -112,8 +114,19 @@ class TermColor:
 def handle_scan(args: argparse.Namespace) -> int:
     """
     Recursively inspect files and print forensic threat reports.
+
+    Args:
+        args: Namespace with `path` (file or directory), `json` (bool) and `show_all` (bool).
+
+    Returns:
+        0 if nothing suspicious was found, 1 if the path does not exist, 2 if at least one
+        file is suspicious (so CI and pre-commit can fail on it).
+
+    Side effects:
+        None on disk; output goes to stdout (errors to stderr).
     """
     ## Resolve target path
+    # A path that does not exist is a usage error (exit 1), distinct from exit 2 which means 'threats found'.
     target_path = Path(args.path).resolve()
     if not target_path.exists():
         print(TermColor.red(f"Error: Target path does not exist: {target_path}"), file=sys.stderr)
@@ -131,11 +144,13 @@ def handle_scan(args: argparse.Namespace) -> int:
             if item.is_file() and not item.is_symlink():
                 files_to_scan.append(item)
 
+    # Nothing to scan is not an error: exit 0 so empty directories do not fail pre-commit hooks.
     ## Early exit if directory is empty
     if not files_to_scan:
         print(TermColor.yellow(f"No regular files discovered under {target_path}"))
         return 0
 
+    # reports keeps every analysis so --all can show clean files; threat_count drives the exit code.
     reports: List[ThreatReport] = []
     threat_count = 0
 
@@ -152,6 +167,7 @@ def handle_scan(args: argparse.Namespace) -> int:
             if not args.json:
                 print(TermColor.red(f"Failed to analyze {file_path}: {ex}"), file=sys.stderr)
 
+    # Machine-readable summary; by default only suspicious reports are included to keep CI logs short.
     ## Output structured JSON if requested
     # JSON mode prints only the JSON document and uses the same exit codes.
     if args.json:
@@ -164,6 +180,7 @@ def handle_scan(args: argparse.Namespace) -> int:
         print(json.dumps(output_data, indent=2))
         return 2 if threat_count > 0 else 0
 
+    # Human mode: totals first so a reader sees the verdict before per-file details.
     ## Human-readable interactive terminal formatting
     print(TermColor.bold(f"\n🔍 Quarantine Sentinel Scan Summary: {target_path}"))
     print(TermColor.dim("=" * 78))
@@ -180,6 +197,7 @@ def handle_scan(args: argparse.Namespace) -> int:
         print(TermColor.dim("=" * 78 + "\n"))
         return 0
 
+    # The badge pairs the risk level with its numeric score (0-100) so two files of the same level can be ranked.
     ## Render individual threat reports
     for r in display_reports:
         # Color-code by severity: CRITICAL and HIGH share red, MEDIUM yellow, LOW cyan,
@@ -219,11 +237,21 @@ def handle_scan(args: argparse.Namespace) -> int:
 
 # Scan, then isolate: a file is moved into the vault only if it is suspicious
 # (or --force is given). --dry-run reports what would happen without touching
-# anything. Note this handler returns 0 even when individual files fail; the
-# failures are printed to stderr.
+# anything. Exit codes: 0 = every file handled, 1 = bad path or at least one file
+# failed to be analyzed/isolated (failures are also printed to stderr).
 def handle_quarantine(args: argparse.Namespace) -> int:
     """
     Scan files and isolate any suspicious payloads into the quarantine vault.
+
+    Args:
+        args: Namespace with `path`, `vault_dir` (None = default vault), `dry_run` and `force`.
+
+    Returns:
+        0 on success, 1 if the path is missing or any file failed to be processed.
+
+    Side effects:
+        Unless --dry-run, moves suspicious files into the vault, strips their permissions and
+        writes a receipt per file.
     """
     target_path = Path(args.path).resolve()
     if not target_path.exists():
@@ -243,6 +271,8 @@ def handle_quarantine(args: argparse.Namespace) -> int:
             if item.is_file() and not item.is_symlink():
                 files_to_check.append(item)
 
+    # Counters: quarantined_count is files isolated (or that would be, in dry-run); failed_count is files that raised
+    # and decides the exit code; receipts collects the audit records issued in this run.
     quarantined_count = 0
     failed_count = 0
     receipts: List[QuarantineReceipt] = []
@@ -251,6 +281,8 @@ def handle_quarantine(args: argparse.Namespace) -> int:
     print(TermColor.dim(f"Vault Directory: {vault.vault_dir}"))
     print(TermColor.dim("=" * 78))
 
+    # Dry-run only reports what WOULD be isolated and never calls vault.quarantine, so nothing is moved.
+    # A real run relocates the payload, strips its permissions (chmod 0000) and writes receipt.json next to it.
     ## Process each candidate file
     for file_path in files_to_check:
         try:
@@ -292,7 +324,14 @@ def handle_quarantine(args: argparse.Namespace) -> int:
 def handle_receipts(args: argparse.Namespace) -> int:
     """
     List all stored quarantine audit receipts.
+
+    Args:
+        args: Namespace with `vault_dir` and `json`.
+
+    Returns:
+        Always 0 (an empty vault is not an error).
     """
+    # Reading receipts never modifies the vault; --json prints the raw records for dashboards and scripts.
     vault = QuarantineVault(vault_dir=args.vault_dir)
     records = vault.list_receipts()
 
@@ -309,6 +348,7 @@ def handle_receipts(args: argparse.Namespace) -> int:
         return 0
 
     for r in records:
+        # A missing status defaults to QUARANTINED: receipts written before the RESTORED state existed have no status field.
         status = r.get("status", "QUARANTINED")
         status_colored = TermColor.green(f"[{status}]") if status == "RESTORED" else TermColor.red(f"[{status}]")
         print(f"{status_colored} {TermColor.cyan(r['quarantine_id'])}")
@@ -327,15 +367,23 @@ def handle_receipts(args: argparse.Namespace) -> int:
 def handle_receipt(args: argparse.Namespace) -> int:
     """
     Inspect the complete cryptographic receipt for a specific quarantine record.
+
+    Args:
+        args: Namespace with `quarantine_id`, `vault_dir` and `json`.
+
+    Returns:
+        0 on success, 1 if the id is not in the vault.
     """
     vault = QuarantineVault(vault_dir=args.vault_dir)
     try:
+        # The vault raises KeyError for an unknown id; it is translated into exit code 1 instead of a traceback.
         receipt = vault.get_receipt(args.quarantine_id)
     except KeyError:
         print(TermColor.red(f"Error: Receipt ID '{args.quarantine_id}' not found in vault."), file=sys.stderr)
         return 1
 
     if args.json:
+        # --json emits the full receipt (hashes, magic result, threat report) for forensic tooling.
         print(json.dumps(receipt.to_dict(), indent=2))
         return 0
 
@@ -359,6 +407,7 @@ def handle_receipt(args: argparse.Namespace) -> int:
     print(f"  • Description : {receipt.magic.get('description')}")
     print(f"  • Executable  : {receipt.magic.get('is_executable')}")
     print(TermColor.dim("-" * 78))
+    # The threat report stored in the receipt is the snapshot taken at quarantine time, not a fresh scan.
     print(TermColor.bold(f"Threat Evaluation (Risk Score: {receipt.threat_report.get('risk_score')}/100):"))
     for f in receipt.threat_report.get("findings", []):
         print(f"  - [{f.get('severity')}] {f.get('title')}")
@@ -373,6 +422,15 @@ def handle_receipt(args: argparse.Namespace) -> int:
 def handle_restore(args: argparse.Namespace) -> int:
     """
     Restore an isolated file after mandatory SHA-256 integrity verification.
+
+    Args:
+        args: Namespace with `quarantine_id`, `target` (destination path/dir or None) and `vault_dir`.
+
+    Returns:
+        0 if the file was verified and restored, 1 on any failure (unknown id, tampered payload, ...).
+
+    Side effects:
+        Moves the payload out of the vault and updates its receipt status.
     """
     vault = QuarantineVault(vault_dir=args.vault_dir)
 
@@ -382,6 +440,8 @@ def handle_restore(args: argparse.Namespace) -> int:
         print(TermColor.green(f"✓ File successfully verified and restored!"))
         print(f"Restored Location: {TermColor.bold(str(dest))}")
         return 0
+    # Every failure mode (unknown id, hash mismatch, destination already exists) surfaces as an exception from the vault;
+    # they are all reported the same way and exit 1.
     except Exception as ex:
         print(TermColor.red(f"Restoration failed: {ex}"), file=sys.stderr)
         return 1
@@ -392,8 +452,15 @@ def handle_restore(args: argparse.Namespace) -> int:
 def handle_verify_vault(args: argparse.Namespace) -> int:
     """
     Audit vault integrity, verifying file digests against receipts.
+
+    Args:
+        args: Namespace with `vault_dir`.
+
+    Returns:
+        0 if the vault is empty or every record passes, 1 if any record fails.
     """
     vault = QuarantineVault(vault_dir=args.vault_dir)
+    # verify_vault_integrity re-hashes each payload and recomputes each receipt's self-digest.
     results = vault.verify_vault_integrity()
 
     print(TermColor.bold(f"\n🔒 Quarantine Vault Integrity Audit"))
@@ -405,6 +472,7 @@ def handle_verify_vault(args: argparse.Namespace) -> int:
         print(TermColor.dim("=" * 78 + "\n"))
         return 0
 
+    # One bad record fails the whole audit, but every record is still printed so the operator sees all damage at once.
     all_passed = True
     for item in results:
         qid = item["quarantine_id"]
@@ -453,6 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available sub-commands")
 
+    # Subcommands: scan (read-only), quarantine (moves files), receipts/receipt (read the audit trail), restore, verify.
     ## Command: scan
     scan_parser = subparsers.add_parser("scan", help="Scan files or directories for disguised executables and threats")
     scan_parser.add_argument("path", help="Path to file or directory to scan")
@@ -496,6 +565,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # No subcommand: print help to stdout and exit 1 (usage error).
     ## If no subcommand provided, show help message
     if not args.command:
         parser.print_help()
