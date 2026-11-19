@@ -1,7 +1,6 @@
 # ==============================================================================
 # Program: hasher.py
 # Programmer: Ethan-da-Tech-Wizard
-# Course: CIS 156 / Advanced Systems
 # Last Modified: November 18, 2026
 # Purpose: Bounded chunk-based cryptographic multi-hash calculation engine.
 #          Computes simultaneous SHA-256, SHA-512, and MD5 digests in 64KB
