@@ -802,9 +802,8 @@ class MagicInspector:
         )
 
     @classmethod
-    # Returns None (treated as unidentified binary) if a NUL byte is present.
-    # Note: latin-1 can decode any byte sequence, so once there is no NUL byte the
-    # latin-1 fallback always succeeds and the inner 'return None' is not reached.
+    # Returns None (treated as unidentified binary) if a NUL byte is present. Without a
+    # NUL byte the buffer is always classified as some kind of text (latin-1 cannot fail).
     def _inspect_plaintext_heuristics(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Analyze whether buffer is plaintext, source code, or text script.
@@ -817,11 +816,9 @@ class MagicInspector:
         try:
             decoded = header.decode("utf-8")
         except UnicodeDecodeError:
-            ## Fallback to Latin-1
-            try:
-                decoded = header.decode("latin-1")
-            except UnicodeDecodeError:
-                return None
+            ## Fallback to Latin-1, which maps every byte value to a code point and therefore
+            ## cannot raise; the NUL-byte check above is the only "this is binary" test here.
+            decoded = header.decode("latin-1")
 
         stripped = decoded.strip()
         lower_stripped = stripped.lower()
