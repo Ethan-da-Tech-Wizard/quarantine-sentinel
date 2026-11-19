@@ -35,9 +35,12 @@ from sentinel.vault import QuarantineReceipt, QuarantineVault
 ## Terminal Color & Formatting Helper
 ## ----------------------------------------------------------------------------
 
+# Colors are decided per call (enabled()) rather than once at import so tests and
+# redirected output behave correctly even if stdout changes after import.
 class TermColor:
     """ANSI Escape sequence color formatter with automatic TTY detection."""
     ## ANSI escape code constants
+    # Raw SGR escape sequences; '9x' codes are the bright foreground variants.
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -103,6 +106,9 @@ class TermColor:
 ## CLI Command Handlers
 ## ----------------------------------------------------------------------------
 
+# Exit-code contract (documented for CI and pre-commit use): 0 = clean,
+# 1 = bad input, 2 = at least one suspicious file. Handlers never modify files;
+# only handle_quarantine and handle_restore touch the filesystem.
 def handle_scan(args: argparse.Namespace) -> int:
     """
     Recursively inspect files and print forensic threat reports.
@@ -119,6 +125,8 @@ def handle_scan(args: argparse.Namespace) -> int:
         files_to_scan.append(target_path)
     else:
         ## Collect regular files recursively, ignoring broken symlinks
+        # sorted() makes output order deterministic; symlinks are skipped so a link
+        # cannot make the scan read (or later move) something outside the target tree.
         for item in sorted(target_path.rglob("*")):
             if item.is_file() and not item.is_symlink():
                 files_to_scan.append(item)
@@ -138,11 +146,14 @@ def handle_scan(args: argparse.Namespace) -> int:
             reports.append(report)
             if report.is_suspicious:
                 threat_count += 1
+        # One unreadable file must not abort a whole-directory scan, so per-file errors
+        # are reported (human mode only) and the loop continues.
         except Exception as ex:
             if not args.json:
                 print(TermColor.red(f"Failed to analyze {file_path}: {ex}"), file=sys.stderr)
 
     ## Output structured JSON if requested
+    # JSON mode prints only the JSON document and uses the same exit codes.
     if args.json:
         output_data = {
             "target": str(target_path),
@@ -161,6 +172,7 @@ def handle_scan(args: argparse.Namespace) -> int:
     print(TermColor.dim("-" * 78))
 
     ## Filter display reports
+    # By default only suspicious files are listed; --all also shows clean ones.
     display_reports = [r for r in reports if args.show_all or r.is_suspicious]
 
     if not display_reports:
@@ -170,6 +182,8 @@ def handle_scan(args: argparse.Namespace) -> int:
 
     ## Render individual threat reports
     for r in display_reports:
+        # Color-code by severity: CRITICAL and HIGH share red, MEDIUM yellow, LOW cyan,
+        # anything else green.
         if r.risk_level == RiskLevel.CRITICAL:
             badge = TermColor.red(f"[{r.risk_level.value} - SCORE {r.risk_score}]")
         elif r.risk_level == RiskLevel.HIGH:
@@ -203,6 +217,10 @@ def handle_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+# Scan, then isolate: a file is moved into the vault only if it is suspicious
+# (or --force is given). --dry-run reports what would happen without touching
+# anything. Note this handler returns 0 even when individual files fail; the
+# failures are printed to stderr.
 def handle_quarantine(args: argparse.Namespace) -> int:
     """
     Scan files and isolate any suspicious payloads into the quarantine vault.
@@ -213,6 +231,7 @@ def handle_quarantine(args: argparse.Namespace) -> int:
         return 1
 
     ## Initialize vault instance
+    # vault_dir=None falls back to the vault's default location.
     vault = QuarantineVault(vault_dir=args.vault_dir)
 
     ## Collect target files
@@ -235,6 +254,7 @@ def handle_quarantine(args: argparse.Namespace) -> int:
     for file_path in files_to_check:
         try:
             report = ThreatEngine.analyze_file(file_path)
+            # --force quarantines regardless of the risk score.
             if report.is_suspicious or args.force:
                 if args.dry_run:
                     print(TermColor.yellow(f"[DRY-RUN] Would quarantine: {file_path} (Risk: {report.risk_level.value} - Score {report.risk_score})"))
@@ -260,6 +280,7 @@ def handle_quarantine(args: argparse.Namespace) -> int:
     return 0
 
 
+# Receipts are the audit trail written for every quarantined item; this lists them.
 def handle_receipts(args: argparse.Namespace) -> int:
     """
     List all stored quarantine audit receipts.
@@ -294,6 +315,7 @@ def handle_receipts(args: argparse.Namespace) -> int:
     return 0
 
 
+# KeyError from the vault means the ID is unknown; report it as a normal error.
 def handle_receipt(args: argparse.Namespace) -> int:
     """
     Inspect the complete cryptographic receipt for a specific quarantine record.
@@ -338,6 +360,8 @@ def handle_receipt(args: argparse.Namespace) -> int:
     return 0
 
 
+# The vault re-verifies the payload's SHA-256 before restoring, so a tampered
+# payload is refused instead of being put back.
 def handle_restore(args: argparse.Namespace) -> int:
     """
     Restore an isolated file after mandatory SHA-256 integrity verification.
@@ -355,6 +379,8 @@ def handle_restore(args: argparse.Namespace) -> int:
         return 1
 
 
+# Exit 1 if any receipt or payload fails its integrity check, so this can be
+# used as a monitoring probe.
 def handle_verify_vault(args: argparse.Namespace) -> int:
     """
     Audit vault integrity, verifying file digests against receipts.
@@ -403,6 +429,8 @@ def handle_verify_vault(args: argparse.Namespace) -> int:
 ## CLI Parser Definition & Main Execution
 ## ----------------------------------------------------------------------------
 
+# One subparser per action. --vault-dir is repeated on each subcommand that
+# uses the vault so it can be given after the subcommand name.
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
     parser = argparse.ArgumentParser(
@@ -454,6 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# argv is injectable so tests can call main([...]) directly and read the int result.
 def main(argv: Optional[List[str]] = None) -> int:
     """Main CLI entry point."""
     parser = build_parser()

@@ -37,6 +37,9 @@ from sentinel.vault import QuarantineVault
 ## Test Suite 1: Binary Magic Inspector
 ## ----------------------------------------------------------------------------
 
+# Tests build synthetic headers byte by byte instead of shipping binary fixtures:
+# no real malware is needed, files are tiny, and the exact bytes under test are
+# visible in the source.
 class TestMagicInspector(unittest.TestCase):
     """Test suite for binary header magic byte parsing."""
 
@@ -54,6 +57,8 @@ class TestMagicInspector(unittest.TestCase):
         """Construct synthetic ELF64 Little-Endian binary header and verify parsing."""
         ## Assemble 64-bit Little-Endian ELF executable header:
         ## \x7fELF (magic) + 2 (64-bit) + 1 (LE) + 1 (version) + 0 (SysV) + 8 zeros + 2 (ET_EXEC) + 0x3E (x86-64)
+        # Adjacent bytes literals are concatenated by Python; the layout matches the ELF
+        # identification block parsed by MagicInspector.
         elf_header = (
             b"\x7fELF"
             b"\x02"
@@ -189,6 +194,8 @@ class TestMagicInspector(unittest.TestCase):
 ## Test Suite 2: Cryptographic Hasher
 ## ----------------------------------------------------------------------------
 
+# Hasher results are compared against hashlib computed over the same bytes, so a
+# bug in the streaming/chunked code cannot hide behind its own reference.
 class TestCryptoHasher(unittest.TestCase):
     """Test suite for streaming cryptographic multi-hash calculations."""
 
@@ -253,6 +260,8 @@ class TestCryptoHasher(unittest.TestCase):
 ## Test Suite 3: Threat Detection Rules Engine
 ## ----------------------------------------------------------------------------
 
+# Each test writes a tiny file whose NAME lies about its CONTENT (or contains
+# tricky Unicode) and asserts that the specific rule ID fires.
 class TestThreatEngine(unittest.TestCase):
     """Test suite for threat detection rules and heuristics."""
 
@@ -266,6 +275,7 @@ class TestThreatEngine(unittest.TestCase):
 
     def test_disguised_elf_binary(self) -> None:
         """Detect an ELF binary disguised as 'quarterly_report.pdf'."""
+        # Name says PDF, bytes say ELF: the core 'disguised binary' scenario.
         disguised_file = Path(self.temp_dir) / "quarterly_report.pdf"
         elf_content = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 60
         disguised_file.write_bytes(elf_content)
@@ -311,6 +321,8 @@ class TestThreatEngine(unittest.TestCase):
 
     def test_unicode_rlo_attack(self) -> None:
         """Detect Right-To-Left Override (U+202E) attack disguised as PDF."""
+        # U+202E (right-to-left override) makes 'exe' display reversed so the file looks
+        # like a harmless '.pdf' in many file managers.
         rlo_filename = "report_\u202Efdp.exe"
         rlo_file = Path(self.temp_dir) / rlo_filename
         rlo_file.write_bytes(b"dummy executable")
@@ -325,6 +337,7 @@ class TestThreatEngine(unittest.TestCase):
 
     def test_unicode_zero_width_attack(self) -> None:
         """Detect zero-width space obfuscation (U+200B)."""
+        # U+200B is a zero-width space: invisible, but breaks exact filename matching.
         zw_filename = "financial\u200Bsummary.pdf.exe"
         zw_file = Path(self.temp_dir) / zw_filename
         zw_file.write_bytes(b"dummy data")
@@ -341,6 +354,8 @@ class TestThreatEngine(unittest.TestCase):
         doc_file = Path(self.temp_dir) / "contract.pdf"
         doc_file.write_bytes(b"%PDF-1.5 legitimate pdf data")
         ## Set dangerous executable permission bits on passive document
+        # Sets mode explicitly: umask would otherwise make the result depend on the host.
+        # The permission-based tests assume POSIX file modes.
         os.chmod(doc_file, 0o755)
 
         ## Execute threat analysis
@@ -380,6 +395,8 @@ class TestThreatEngine(unittest.TestCase):
 ## Test Suite 4: Quarantine Vault Storage & Receipts
 ## ----------------------------------------------------------------------------
 
+# The vault is created inside a per-test temp directory, so tests never touch a
+# real quarantine location.
 class TestQuarantineVault(unittest.TestCase):
     """Test suite for quarantine vault isolation, permission stripping, and audit receipts."""
 
@@ -411,6 +428,7 @@ class TestQuarantineVault(unittest.TestCase):
         self.assertTrue(payload_path.exists())
 
         ## Verify permissions have been stripped to mode 0o000 (inert stone)
+        # 0o000 means no read/write/execute for anyone: the quarantined file is inert.
         payload_mode = stat.S_IMODE(payload_path.stat().st_mode)
         self.assertEqual(payload_mode, 0o000)
 
@@ -441,6 +459,8 @@ class TestQuarantineVault(unittest.TestCase):
 
         ## 2. Introduce unauthorized payload modification
         payload_file = self.vault.payloads_dir / receipt.quarantine_id / "payload.bin"
+        # The vault stripped all permissions, so the test must restore write access before
+        # it can simulate an attacker modifying the payload, then re-lock it.
         os.chmod(payload_file, 0o600)
         payload_file.write_bytes(b"tampered content")
         os.chmod(payload_file, 0o000)
@@ -476,6 +496,7 @@ class TestQuarantineVault(unittest.TestCase):
 ## Test Suite 5: CLI Subcommand Integration
 ## ----------------------------------------------------------------------------
 
+# These tests call main([...]) in-process and check exit codes (0 clean, 2 threats).
 class TestCLIIntegration(unittest.TestCase):
     """Test suite for CLI subcommands."""
 

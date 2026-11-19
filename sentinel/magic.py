@@ -16,6 +16,8 @@ Purpose: Inspect initial binary header bytes to determine true biological file f
 
 from __future__ import annotations
 
+# struct is used to decode fixed-width integers in headers, always with an explicit
+# byte order ('<' little-endian, '>' big-endian) so results do not depend on host.
 ## Standard binary parsing and data container libraries
 import struct
 from dataclasses import dataclass, field
@@ -28,6 +30,8 @@ from typing import Dict, List, Optional, Tuple, Union
 ## File Type Classification Enum
 ## ----------------------------------------------------------------------------
 
+# str mixin makes members compare equal to their string values and serialize cleanly
+# to JSON in receipts.
 class FileTypeCategory(str, Enum):
     """
     High-level functional category of a file.
@@ -112,6 +116,9 @@ class MagicInspector:
     """
 
     ## Bounded buffer limit: 4096 bytes covers headers for ELF, PE, Mach-O, and Zip manifests
+    # Only the first 4096 bytes are ever read: enough for every signature below
+    # (the tar 'ustar' marker sits at offset 257, ZIP member names appear early),
+    # and it bounds memory use on huge or hostile files.
     HEADER_READ_SIZE: int = 4096
 
     ## =========================================================================
@@ -200,6 +207,8 @@ class MagicInspector:
     OLE_COMPOUND_MAGIC: bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
     @classmethod
+    # Detection order matters: more specific signatures are tested before looser ones,
+    # and text heuristics come last because almost any byte string could be 'text'.
     def inspect_bytes(cls, header: bytes) -> MagicInspectionResult:
         """
         Analyze an in-memory byte slice (typically initial 4KB of a file).
@@ -229,6 +238,8 @@ class MagicInspector:
         ## ---------------------------------------------------------------------
         ## 2. Microsoft Windows PE / DOS Binaries
         ## ---------------------------------------------------------------------
+        # 'MZ' is only two bytes, so a PE result is accepted only via _parse_pe_header;
+        # if it returns None the other checks still run.
         if header.startswith(cls.DOS_MZ_MAGIC):
             pe_result = cls._parse_pe_header(header, hex_preview)
             if pe_result is not None:
@@ -422,6 +433,8 @@ class MagicInspector:
         )
 
     @classmethod
+    # FileNotFoundError is raised for non-regular files (callers decide how to report);
+    # unreadable files yield a synthetic 'inaccessible' result instead of an exception.
     def inspect_file(cls, path: Union[str, Path]) -> MagicInspectionResult:
         """
         Safely open and inspect a file from the filesystem.
@@ -460,6 +473,9 @@ class MagicInspector:
     ## =========================================================================
 
     @classmethod
+    # ELF layout used here: e_ident[4] class (1=32-bit, 2=64-bit), e_ident[5] data
+    # encoding (1=LE, 2=BE), e_ident[7] OS ABI, and e_type at offset 16 whose byte
+    # order follows the encoding byte, which is why 'endian' is tracked.
     def _parse_elf_header(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Parse POSIX Executable and Linkable Format (ELF) header fields.
@@ -516,6 +532,10 @@ class MagicInspector:
         )
 
     @classmethod
+    # PE layout: the 4-byte value at offset 0x3C of the DOS header points to the 'PE\0\0'
+    # signature; the COFF machine type follows it, and bit 0x2000 of the
+    # characteristics field marks a DLL. All offsets are checked against the 4 KB
+    # sample length so truncated files never raise.
     def _parse_pe_header(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Parse Microsoft Portable Executable (PE) headers.
@@ -583,6 +603,9 @@ class MagicInspector:
         )
 
     @classmethod
+    # 0xCAFEBABE is shared by Mach-O universal (fat) binaries and Java .class files.
+    # The two are told apart by the next field: a value of 45-70 in bytes 6-8 is a
+    # plausible Java major version, whereas fat binaries store a small arch count.
     def _parse_macho_header(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Parse Apple Mach-O binaries (macOS / iOS executables, dylibs, bundles).
@@ -670,6 +693,9 @@ class MagicInspector:
         return None
 
     @classmethod
+    # The interpreter is classified by substring on the lowercased shebang line, tested
+    # in order (bash, then 'sh', python, perl, ruby, node). Because 'sh' is a plain
+    # substring test, an interpreter path merely containing 'sh' is labeled POSIX shell.
     def _parse_shebang(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Parse POSIX Shebang (`#!`) interpreter directive.
@@ -712,6 +738,9 @@ class MagicInspector:
         )
 
     @classmethod
+    # Office Open XML files and JARs are ZIPs; they are recognized by marker member
+    # names ([Content_Types].xml plus word/, xl/, ppt/, or META-INF/MANIFEST.MF) that
+    # appear in the first 4 KB. JARs are flagged executable, Office files are not.
     def _parse_zip_container(cls, header: bytes, hex_preview: str) -> MagicInspectionResult:
         """
         Inspect PKZip containers to distinguish generic ZIPs from Office documents (DOCX/XLSX/PPTX) or JARs.
@@ -773,6 +802,9 @@ class MagicInspector:
         )
 
     @classmethod
+    # Returns None (treated as unidentified binary) if a NUL byte is present.
+    # Note: latin-1 can decode any byte sequence, so once there is no NUL byte the
+    # latin-1 fallback always succeeds and the inner 'return None' is not reached.
     def _inspect_plaintext_heuristics(cls, header: bytes, hex_preview: str) -> Optional[MagicInspectionResult]:
         """
         Analyze whether buffer is plaintext, source code, or text script.
