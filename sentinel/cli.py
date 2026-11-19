@@ -244,6 +244,7 @@ def handle_quarantine(args: argparse.Namespace) -> int:
                 files_to_check.append(item)
 
     quarantined_count = 0
+    failed_count = 0
     receipts: List[QuarantineReceipt] = []
 
     print(TermColor.bold(f"\n🛡️  Quarantine Sentinel: Isolating Untrusted Payloads"))
@@ -269,6 +270,7 @@ def handle_quarantine(args: argparse.Namespace) -> int:
                     print(f"  → Audit Receipt Issued: {vault.payloads_dir / receipt.quarantine_id / 'receipt.json'}")
         except Exception as ex:
             print(TermColor.red(f"Failed to process {file_path}: {ex}"), file=sys.stderr)
+            failed_count += 1
 
     print(TermColor.dim("-" * 78))
     if args.dry_run:
@@ -276,6 +278,12 @@ def handle_quarantine(args: argparse.Namespace) -> int:
     else:
         print(TermColor.green(f"Quarantine completed. {quarantined_count} file(s) safely isolated into vault."))
     print(TermColor.dim("=" * 78 + "\n"))
+
+    ## A file that could not be analyzed or isolated is still sitting un-quarantined, so
+    ## scripts and CI must see a nonzero exit instead of a false "all clear".
+    if failed_count:
+        print(TermColor.red(f"{failed_count} file(s) could not be processed."), file=sys.stderr)
+        return 1
 
     return 0
 
