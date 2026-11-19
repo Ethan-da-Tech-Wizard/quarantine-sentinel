@@ -199,10 +199,12 @@ class TestMagicInspector(unittest.TestCase):
 class TestCryptoHasher(unittest.TestCase):
     """Test suite for streaming cryptographic multi-hash calculations."""
 
+    # One scratch directory per test so created sample files never collide.
     def setUp(self) -> None:
         ## Create temporary directory for scratch files
         self.temp_dir = tempfile.mkdtemp()
 
+    # ignore_errors keeps a cleanup problem from hiding the real test failure.
     def tearDown(self) -> None:
         ## Clean up temporary test files
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -265,10 +267,12 @@ class TestCryptoHasher(unittest.TestCase):
 class TestThreatEngine(unittest.TestCase):
     """Test suite for threat detection rules and heuristics."""
 
+    # Scratch directory for sample files the threat engine scans.
     def setUp(self) -> None:
         ## Create scratch environment
         self.temp_dir = tempfile.mkdtemp()
 
+    # Cleanup tolerates files the test already removed.
     def tearDown(self) -> None:
         ## Remove scratch environment
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -400,12 +404,15 @@ class TestThreatEngine(unittest.TestCase):
 class TestQuarantineVault(unittest.TestCase):
     """Test suite for quarantine vault isolation, permission stripping, and audit receipts."""
 
+    # The vault gets its own directory under the temp dir so quarantine moves stay
+    # inside the sandbox and never touch the real vault location.
     def setUp(self) -> None:
         ## Initialize isolated vault directory
         self.temp_dir = tempfile.mkdtemp()
         self.vault_dir = Path(self.temp_dir) / "vault"
         self.vault = QuarantineVault(vault_dir=self.vault_dir)
 
+    # Removes the vault with everything quarantined during the test.
     def tearDown(self) -> None:
         ## Teardown temporary directory
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -500,11 +507,13 @@ class TestQuarantineVault(unittest.TestCase):
 class TestCLIIntegration(unittest.TestCase):
     """Test suite for CLI subcommands."""
 
+    # CLI tests run against a private vault directory passed on the command line.
     def setUp(self) -> None:
         ## Initialize scratch CLI testing environment
         self.temp_dir = tempfile.mkdtemp()
         self.vault_dir = Path(self.temp_dir) / "cli_vault"
 
+    # Removes the CLI vault directory with everything the CLI wrote into it.
     def tearDown(self) -> None:
         ## Clean up scratch directory
         shutil.rmtree(self.temp_dir, ignore_errors=True)
