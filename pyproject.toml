@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-    { name = "Ethan Kilmer", email = "ethan@twu.software" }
+    { name = "Ethan-da-Tech-Wizard" }
 ]
 # Search keywords for package indexes (no effect on behaviour).
 keywords = [
