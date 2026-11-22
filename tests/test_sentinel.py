@@ -1,12 +1,3 @@
-# ==============================================================================
-# Program: test_sentinel.py
-# Programmer: Ethan-da-Tech-Wizard
-# Last Modified: November 18, 2026
-# Purpose: Automated unit and integration test suite for Quarantine Sentinel.
-#          Validates magic byte parsing, streaming cryptographic hashing,
-#          heuristic detection rules, vault quarantine and permission neutralization,
-#          HMAC receipt verification, and CLI command execution.
-# ==============================================================================
 """
 Program: Quarantine Sentinel - Automated Test Suite
 Programmer: Ethan Kilmer

@@ -1,11 +1,3 @@
-# ==============================================================================
-# Program: __init__.py
-# Programmer: Ethan-da-Tech-Wizard
-# Last Modified: November 18, 2026
-# Purpose: Test package initializer for Quarantine Sentinel.
-#          Marks the tests directory as an importable package enabling automated
-#          test discovery via standard Python unittest runners.
-# ==============================================================================
 """
 Program: Quarantine Sentinel - Test Suite Initialization
 Programmer: Ethan Kilmer

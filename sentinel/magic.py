@@ -1,12 +1,3 @@
-# ==============================================================================
-# Program: magic.py
-# Programmer: Ethan-da-Tech-Wizard
-# Last Modified: November 18, 2026
-# Purpose: Deep binary signature and magic byte header inspection engine.
-#          Examines raw leading byte offsets to identify true file formats
-#          (ELF, PE, Mach-O, WASM, Shebang, PDF, ZIP, Media) independently
-#          of deceptive file extensions or MIME-type claims.
-# ==============================================================================
 """
 Program: Quarantine Sentinel - Binary Magic Signature & Header Analyzer
 Programmer: Ethan Kilmer

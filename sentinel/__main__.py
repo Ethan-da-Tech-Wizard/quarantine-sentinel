@@ -1,11 +1,3 @@
-# ==============================================================================
-# Program: __main__.py
-# Programmer: Ethan-da-Tech-Wizard
-# Last Modified: November 18, 2026
-# Purpose: Executable entrypoint for Quarantine Sentinel module execution.
-#          Facilitates execution via `python3 -m sentinel` by routing command-line
-#          arguments to the main CLI dispatcher and propagating the integer exit code.
-# ==============================================================================
 """
 Program: Quarantine Sentinel - Executable Module Entrypoint
 Programmer: Ethan Kilmer

@@ -1,12 +1,3 @@
-# ==============================================================================
-# Program: cli.py
-# Programmer: Ethan-da-Tech-Wizard
-# Last Modified: November 18, 2026
-# Purpose: POSIX-compliant command-line interface for Quarantine Sentinel.
-#          Parses arguments for scan, quarantine, list, receipt, verify, and restore
-#          actions. Delivers ANSI-colored terminal summaries or structured JSON
-#          output for integration into automated security operations pipelines.
-# ==============================================================================
 """
 Program: Quarantine Sentinel - Command-Line Interface (CLI)
 Programmer: Ethan Kilmer

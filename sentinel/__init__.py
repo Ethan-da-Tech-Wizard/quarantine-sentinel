@@ -1,12 +1,3 @@
-# ==============================================================================
-# Program: __init__.py
-# Programmer: Ethan-da-Tech-Wizard
-# Last Modified: November 18, 2026
-# Purpose: Top-level package initializer and public interface for Quarantine Sentinel.
-#          Exports core classes and functions including MagicInspector, CryptoHasher,
-#          ThreatEngine, and QuarantineVault to provide a clean API for threat detection,
-#          cryptographic integrity hashing, and atomic quarantine isolation.
-# ==============================================================================
 """
 Program: Quarantine Sentinel - Package Interface & Public Exports
 Programmer: Ethan Kilmer
